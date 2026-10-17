@@ -160,6 +160,7 @@ paths:
                         - type: object
                           properties:
                             candidates: { type: array, items: { type: object, properties: { id: { type: string }, label: { type: string }, p: { type: number } } } }
+                            reviewSince: { type: [string, "null"], format: date-time, description: When the row was last put in review, from the decision log; null if the log has no such decision }
                             rule: { type: [object, "null"], properties: { payee: { type: string }, notesContains: { type: string } } }
   /v1/report/spend:
     get:

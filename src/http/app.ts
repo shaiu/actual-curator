@@ -108,8 +108,9 @@ export function createApp(deps: ApiDeps): Hono {
       const probs = d?.classification?.category?.probabilities ?? {};
       const candidates = Object.entries(probs).sort((a, b) => b[1] - a[1]).slice(0, 3)
         .map(([id, p]) => ({ id, label: lbl.get(id) ?? id, p }));
+      const since = await log.lastFor(r.id, x => x.kind === 'review');
       const rule = ruleForRow(r, '', vocab);
-      out.push({ ...view(r, lbl), candidates,
+      out.push({ ...view(r, lbl), candidates, reviewSince: since?.at ?? null,
         rule: rule ? { payee: rule.importedPayee, ...(rule.notesContains ? { notesContains: rule.notesContains } : {}) } : null });
     }
     return c.json({ rows: out });

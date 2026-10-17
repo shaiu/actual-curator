@@ -6,6 +6,11 @@
   becomes a rule on the generic payee Actual imports it under (`הוראת-קבע`) plus the name in the
   memo. Before, it became a rule on the recipient's name, which never matched.
 
+## 0.1.2 — reviewSince on /v1/review rows
+
+- Each `/v1/review` row carries `reviewSince`: when it was put in review, from the decision log
+  (`null` if the log has no such decision).
+
 ## 0.1.1
 
 - Home Assistant app: default host port 8507 instead of 5007, which the Traccar app holds. The

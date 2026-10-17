@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- `/v1/review` rows now say when they were put in review (`reviewSince`).
+
 ## 0.1.1
 
 - The HTTP API's default host port is now 8507. 5007 collided with the Traccar app, which holds
