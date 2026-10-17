@@ -42,3 +42,9 @@ test('config.yaml follows the Home Assistant app guidelines', () => {
   expect(Object.keys(tr.network)).toEqual(Object.keys(raw.ports as object));
   expect(readFileSync('actual_curator/Dockerfile', 'utf8')).toContain('io.hass.type="app"');
 });
+
+test('icon.png is square and logo.png is landscape, as the app store shows them', () => {
+  const size = (f: string) => { const b = readFileSync(`actual_curator/${f}`); return [b.readUInt32BE(16), b.readUInt32BE(20)]; };
+  expect(size('icon.png')).toEqual([128, 128]);
+  expect(size('logo.png')).toEqual([250, 100]);
+});
