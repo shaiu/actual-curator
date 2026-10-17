@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { proposeRules, type YnabExport } from '../../src/bootstrap/ynab.ts';
+import { bankPayeeFor, proposeRules, type YnabExport } from '../../src/bootstrap/ynab.ts';
 
 let n = 0;
 const tx = (payee: string, category: string | null, over: Record<string, unknown> = {}) => ({ id: `x${++n}`,
@@ -39,4 +39,23 @@ test('deleted, transfer, off-budget, uncategorized and out-of-window rows are ig
 test('payees whose category is hidden or internal get no rule', () => {
   const rows = [tx('shop', 'gone'), tx('shop', 'gone'), tx('emp', 'rta', { amount: 100 }), tx('emp', 'rta', { amount: 100 })];
   expect(proposeRules(exp(rows), opts)).toEqual([]);
+});
+
+const memoOpts = { ...opts, memoKeyPatterns: ['לטובת:\\s*(.+?)(?:\\.|$)'] };
+
+test('a payee YNAB named after the memo recipient is marked with that memo key', () => {
+  const memo = 'לטובת: Shop. עבור: rent 31-022';
+  const rows = [tx('shop', 'coffee', { memo }), tx('shop', 'coffee', { memo }), tx('aroma', 'coffee', { memo: 'לטובת: someone else.' }),
+    tx('aroma', 'coffee')];
+  expect(proposeRules(exp(rows), memoOpts)).toEqual([
+    { importedPayee: 'Shop', categoryLabel: 'Needs / Coffee', rows: 2, agreement: 1, memoKey: 'Shop' },
+    { importedPayee: 'ארומה', categoryLabel: 'Needs / Coffee', rows: 2, agreement: 1 }]);
+});
+
+test('the bank payee for a memo-named rule is the generic payee Actual imported those rows under', () => {
+  const generic = ['הוראת-קבע', 'PAYBOX'];
+  const row = (importedPayee: string | null, memo: string) => ({ importedPayee, memo });
+  expect(bankPayeeFor('אדם וטל', [row('אדם וטל', 'x'), row('הוראת-קבע', 'לטובת: אדם וטל. עבור: rent')], generic)).toBe('הוראת-קבע');
+  expect(bankPayeeFor('אדם וטל', [row('Other bank', 'לטובת: אדם וטל.')], generic)).toBeUndefined();
+  expect(bankPayeeFor('אדם וטל', [], generic)).toBeUndefined();
 });

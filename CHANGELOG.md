@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Rule bootstrap: a YNAB payee named after the memo (a standing order shown as its recipient)
+  becomes a rule on the generic payee Actual imports it under (`הוראת-קבע`) plus the name in the
+  memo. Before, it became a rule on the recipient's name, which never matched.
+
 ## 0.1.1
 
 - Home Assistant app: default host port 8507 instead of 5007, which the Traccar app holds. The
