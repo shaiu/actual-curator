@@ -1,0 +1,77 @@
+configuration:
+  actual_server_url:
+    name: Actual server URL
+    description: >-
+      Where your Actual sync-server listens, as seen from inside Home Assistant. If Actual runs as an
+      app on this machine with port 5006 mapped, http://172.30.32.1:5006 works.
+  actual_password:
+    name: Actual password
+    description: The password you log in to Actual with.
+  actual_sync_id:
+    name: Actual sync ID
+    description: In Actual, Settings → Show advanced settings → Sync ID.
+  curator_token:
+    name: API token
+    description: Clients (assistants, n8n) send this as "Authorization Bearer". Make it long and random.
+  classifier_provider:
+    name: Classifier
+    description: >-
+      openrouter-jev (default, calibrated confidence), anthropic, or openai-compatible (OpenAI, Groq,
+      or a local Ollama so nothing leaves your network).
+  openrouter_api_key:
+    name: OpenRouter API key
+    description: Needed for openrouter-jev.
+  openrouter_model:
+    name: OpenRouter model
+    description: Default typesafe/jev-1.14.
+  openrouter_base_url:
+    name: OpenRouter base URL
+    description: Only to route Jev through a gateway.
+  anthropic_api_key:
+    name: Anthropic API key
+    description: Needed for the anthropic provider.
+  anthropic_model:
+    name: Anthropic model
+    description: Default claude-haiku-5-5.
+  openai_base_url:
+    name: OpenAI-compatible base URL
+    description: For example https://api.openai.com/v1 or http://<ollama-host>:11434/v1.
+  openai_api_key:
+    name: OpenAI-compatible API key
+    description: Leave empty for a local model that needs none.
+  openai_model:
+    name: OpenAI-compatible model
+    description: Model name at that endpoint.
+  confidence_threshold:
+    name: Category confidence threshold
+    description: A category is written only at or above this confidence; below it the row is tagged #review.
+  tag_threshold:
+    name: Tag threshold
+    description: Default probability a tag needs; tags can override it in curator.yaml.
+  promote_after:
+    name: Promote after
+    description: Identical confident answers for a payee before the classifier's answer becomes a rule.
+  run_interval_minutes:
+    name: Run every (minutes)
+  lookback_days:
+    name: Look back (days)
+    description: Only rows this recent are curated.
+  dry_run:
+    name: Dry run
+    description: Log every decision without writing to Actual. Starts on; turn off once the log looks right.
+  currency:
+    name: Currency
+    description: ISO code shown to the classifier next to amounts, for example ILS or EUR.
+  vocab_path:
+    name: Vocabulary file
+    description: Tags, hints and generic payees. Created from the example on first start; edit it in this app's config folder.
+  telegram_bot_token:
+    name: Telegram bot token
+    description: Optional alert channel.
+  telegram_chat_id:
+    name: Telegram chat ID
+  notify_ha_persistent:
+    name: Home Assistant notification
+    description: Raise a persistent notification when runs have failed for an hour, and when they recover.
+network:
+  5007/tcp: HTTP API (bearer token; keep it on your LAN or tailnet, not the internet)

@@ -1,0 +1,224 @@
+openapi: 3.1.0
+info:
+  title: actual-curator
+  version: 0.1.0
+  description: |
+    Categorization, tagging and review for an Actual Budget file. Every route except `/v1/health`
+    needs `Authorization: Bearer <CURATOR_TOKEN>`. Amounts are integers in minor units (as Actual
+    stores them) plus a `formatted` string ("-25.50"), which is what an assistant should show.
+    Errors are `{"error": {"code", "message"}}`.
+servers:
+  - url: http://localhost:5007
+security:
+  - bearer: []
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer }
+  parameters:
+    from: { name: from, in: query, schema: { type: string, format: date }, description: "YYYY-MM-DD; default first of this month" }
+    to: { name: to, in: query, schema: { type: string, format: date }, description: "YYYY-MM-DD; default today" }
+  schemas:
+    Money:
+      type: object
+      properties: { amount: { type: integer }, formatted: { type: string, example: "-25.50" } }
+    Error:
+      type: object
+      properties: { error: { type: object, properties: { code: { type: string }, message: { type: string } } } }
+    Transaction:
+      type: object
+      properties:
+        id: { type: string }
+        date: { type: string, format: date }
+        account: { type: string }
+        accountName: { type: string }
+        payee: { type: [string, "null"] }
+        importedPayee: { type: [string, "null"] }
+        memo: { type: string, description: The notes without the trailing curator tags }
+        tags: { type: array, items: { type: string } }
+        notes: { type: string }
+        amount: { type: integer }
+        formatted: { type: string }
+        category: { type: [string, "null"] }
+        categoryLabel: { type: [string, "null"], example: "Needs / Coffee" }
+    ReportRow:
+      type: object
+      properties: { key: { type: [string, "null"] }, label: { type: string }, amount: { type: integer }, formatted: { type: string } }
+    Report:
+      type: object
+      properties:
+        from: { type: string }
+        to: { type: string }
+        rows: { type: array, items: { $ref: "#/components/schemas/ReportRow" } }
+        total: { $ref: "#/components/schemas/Money" }
+    RunSummary:
+      type: object
+      properties:
+        synced: { type: boolean }
+        ok: { type: boolean }
+        seen: { type: integer }
+        ruleHits: { type: integer }
+        classified: { type: integer }
+        review: { type: integer }
+        settled: { type: integer }
+        corrections: { type: integer }
+        promoted: { type: integer }
+        errors: { type: integer }
+    Rule:
+      type: object
+      properties:
+        id: { type: string }
+        payee: { type: string }
+        notesContains: { type: string }
+        category: { type: string }
+        categoryLabel: { type: string }
+        origin: { type: [string, "null"], enum: [human, promoted, bootstrap, null] }
+        supported: { type: boolean, description: Whether the curator applies it to backlog rows itself }
+        conditions: { type: array, items: { type: object } }
+        actions: { type: array, items: { type: object } }
+  responses:
+    Error:
+      description: Error
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+paths:
+  /v1/health:
+    get:
+      summary: Liveness, last sync and run, review backlog, versions
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  lastSyncAt: { type: [string, "null"] }
+                  lastRunAt: { type: [string, "null"] }
+                  pendingReview: { type: integer }
+                  classifier: { type: object, properties: { name: { type: string }, reachable: { type: [boolean, "null"] } } }
+                  versions: { type: object, properties: { curator: { type: string }, actualApi: { type: string }, server: { type: string } } }
+  /v1/categories:
+    get:
+      summary: Non-hidden categories with "Group / Name" labels and the income flag
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { categories: { type: array, items: { type: object, properties: { id: { type: string }, label: { type: string }, isIncome: { type: boolean } } } } } } } } }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/tags:
+    get:
+      summary: The tag vocabulary with meanings, reserved tags and exclusive pairs
+      responses:
+        "200": { description: OK }
+        "401": { $ref: "#/components/responses/Error" }
+  /v1/transactions:
+    get:
+      summary: Search transactions, newest first
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date }, description: default 30 days ago }
+        - { $ref: "#/components/parameters/to" }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: tag, in: query, schema: { type: string }, description: "with or without #" }
+        - { name: account, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string }, description: Text in payee or notes }
+        - { name: limit, in: query, schema: { type: integer, default: 100, maximum: 1000 } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { transactions: { type: array, items: { $ref: "#/components/schemas/Transaction" } } } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/transactions/{id}:
+    post:
+      summary: Set a category and/or change tags. Setting a category removes #review and, unless rule is false, creates or replaces the matching human rule.
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                category: { type: string }
+                tags: { type: object, properties: { add: { type: array, items: { type: string } }, remove: { type: array, items: { type: string } } } }
+                rule: { type: boolean, default: true }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { transaction: { $ref: "#/components/schemas/Transaction" }, ruleId: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/review:
+    get:
+      summary: Rows tagged #review, oldest first, with the classifier's top-3 candidates and the rule an answer would create
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rows:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/Transaction"
+                        - type: object
+                          properties:
+                            candidates: { type: array, items: { type: object, properties: { id: { type: string }, label: { type: string }, p: { type: number } } } }
+                            rule: { type: [object, "null"], properties: { payee: { type: string }, notesContains: { type: string } } }
+  /v1/report/spend:
+    get:
+      summary: Net spend (refunds reduce it), excluding transfers, off-budget accounts and income categories
+      parameters:
+        - { $ref: "#/components/parameters/from" }
+        - { $ref: "#/components/parameters/to" }
+        - { name: by, in: query, schema: { type: string, enum: [category, group, tag], default: category } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Report" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/report/income:
+    get:
+      summary: Net inflow by income category
+      parameters: [{ $ref: "#/components/parameters/from" }, { $ref: "#/components/parameters/to" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Report" } } } }
+  /v1/report/compare:
+    get:
+      summary: Spend by category, this month (or year) to date against the whole previous one
+      parameters: [{ name: period, in: query, schema: { type: string, enum: [month, year], default: month } }]
+      responses:
+        "200": { description: OK }
+  /v1/rules:
+    get:
+      summary: All Actual rules, with the curator's origin record and whether it evaluates them itself
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { rules: { type: array, items: { $ref: "#/components/schemas/Rule" } } } } } } }
+    post:
+      summary: Create a rule "imported payee is X [and notes contain Y] → category"; replaces one with the same conditions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payee, category]
+              properties:
+                payee: { type: string }
+                notesContains: { type: string }
+                category: { type: string }
+                origin: { type: string, enum: [human, bootstrap, promoted], default: human }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { id: { type: string } } } } } }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/rules/{id}:
+    delete:
+      summary: Delete a rule
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: OK }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/curate/run:
+    post:
+      summary: Run the curator now (waits for an in-flight run instead of starting a second)
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/RunSummary" } } } }
+  /v1/decisions:
+    get:
+      summary: The decision log since a time (default the last 24 hours)
+      parameters: [{ name: since, in: query, schema: { type: string, format: date-time } }]
+      responses:
+        "200": { description: OK }

@@ -1,0 +1,12 @@
+node_modules
+.git
+.github
+.worktrees
+.superpowers
+data
+docs
+test
+scripts
+*.env
+.env
+coverage

@@ -1,0 +1,56 @@
+name: Actual Curator
+description: Keeps every new Actual Budget transaction categorized and tagged, and learns rules from your answers
+version: "0.1.0"
+slug: actual_curator
+url: https://github.com/shaiu/actual-curator
+arch:
+  - amd64
+  - aarch64
+stage: experimental
+image: ghcr.io/shaiu/actual-curator-ha
+homeassistant_api: true
+ports:
+  5007/tcp: 5007
+map:
+  - type: app_config
+    read_only: false
+options:
+  actual_server_url: http://172.30.32.1:5006
+  actual_password: ""
+  actual_sync_id: ""
+  curator_token: ""
+  classifier_provider: openrouter-jev
+  openrouter_api_key: ""
+  confidence_threshold: 0.95
+  tag_threshold: 0.7
+  promote_after: 3
+  run_interval_minutes: 15
+  lookback_days: 60
+  dry_run: true
+  vocab_path: /config/curator.yaml
+  notify_ha_persistent: true
+schema:
+  actual_server_url: url
+  actual_password: password
+  actual_sync_id: str
+  curator_token: password
+  classifier_provider: list(openrouter-jev|anthropic|openai-compatible)
+  openrouter_api_key: password?
+  openrouter_model: str?
+  openrouter_base_url: url?
+  anthropic_api_key: password?
+  anthropic_model: str?
+  openai_base_url: url?
+  openai_api_key: password?
+  openai_model: str?
+  confidence_threshold: float(0,1)
+  tag_threshold: float(0,1)
+  promote_after: int(1,)
+  run_interval_minutes: int(1,)
+  lookback_days: int(1,)
+  dry_run: bool
+  currency: str?
+  vocab_path: str
+  telegram_bot_token: password?
+  telegram_chat_id: str?
+  notify_ha_persistent: bool

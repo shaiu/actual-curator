@@ -1,0 +1,30 @@
+{
+  "name": "actual-curator",
+  "version": "0.1.0",
+  "description": "Hands-off categorization and tagging for Actual Budget",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc",
+    "start": "node src/main.ts",
+    "check": "tsc && vitest run"
+  },
+  "dependencies": {
+    "@actual-app/api": "^26.10.0",
+    "@anthropic-ai/sdk": "^0.135.0",
+    "@hono/node-server": "^2.1.5",
+    "hono": "^4.13.13",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

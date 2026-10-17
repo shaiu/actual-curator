@@ -1,0 +1,75 @@
+# actual-curator vocabulary. Copy to $DATA_DIR/curator.yaml (or set VOCAB_PATH) and edit freely.
+# These are the author's own values; nothing in the code depends on them.
+# "#auto" and "#review" are reserved for the curator and must not appear here.
+
+tags:
+  - tag: kids
+    meaning: "For a child: school, after-school care (צהרון), activities, toys, kids' clothes, camps"
+    threshold: 0.7
+  - tag: household
+    meaning: "Shared home running costs: groceries, utilities, rent, maintenance"
+    threshold: 0.7
+  - tag: personal
+    meaning: "For one adult's own use"
+    threshold: 0.7
+  - tag: recurring
+    meaning: "Repeats monthly or on a fixed cycle (bills, standing orders / הוראת-קבע, subscriptions)"
+    threshold: 0.7
+  - tag: subscription
+    meaning: "A recurring digital or membership service"
+    threshold: 0.7
+  - tag: online
+    meaning: "Paid online rather than in a shop"
+    threshold: 0.7
+  - tag: essential
+    meaning: "Would still be paid in a tight month"
+    threshold: 0.7
+  - tag: discretionary
+    meaning: "Could be skipped in a tight month"
+    threshold: 0.7
+  - tag: travel
+    meaning: "Vacation or trip spend, at home or abroad"
+    threshold: 0.7
+  - tag: gift
+    meaning: "A present or donation to someone outside the household"
+    threshold: 0.7
+  - tag: health
+    meaning: "Medical, dental, pharmacy, insurance"
+    threshold: 0.7
+  - tag: car
+    meaning: "Fuel, parking, tolls, maintenance, insurance"
+    threshold: 0.7
+
+# Pairs where at most one tag is written: the more probable one, and only if it reaches 0.70.
+exclusive:
+  - [essential, discretionary]
+
+# One-line hints for ambiguous categories, keyed "Group / Category" as shown in Actual.
+categoryHints:
+  "Needs / Coffee": "Cafés and coffee to go, not a sit-down meal"
+  "Needs / Office lunch": "A workday lunch near the office, usually a weekday around noon"
+  "Wants / Dining out": "A restaurant meal or takeaway for pleasure, often evenings or weekends"
+  "Needs / Groceries": "Supermarkets and grocery stores for the home"
+
+# Payees whose name says nothing; rules for them also match on the memo phrase.
+genericPayees:
+  - PAYBOX
+  - BIT
+  - "העברה ב BIT בנה\"פ"
+  - "הוראת-קבע"
+  - "העברה לבנק אחר"
+
+# Payees whose rows always go to #review unless a rule already categorized them: a transfer to a person
+# can be anything. Answering one creates a rule on the payee plus the memo phrase, so the next transfer
+# to the same person for the same thing is categorized at import.
+reviewPayees:
+  - PAYBOX
+  - BIT
+  - "העברה ב BIT בנה\"פ"
+
+# Regex sources; the first capture group is the memo phrase rules match on.
+# Tried in order, first match wins. The recipient (לטובת) comes first: two standing orders can share a
+# purpose ("עבור: שכר דירה") while going to different people for different things.
+memoKeyPatterns:
+  - 'לטובת:\s*(.+?)(?:\.|$)'
+  - 'עבור:\s*(.+?)(?:\.|$)'

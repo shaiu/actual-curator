@@ -1,0 +1,12 @@
+# Runs actual-curator next to an Actual server. Copy to docker-compose.yml and .env.example to .env.
+services:
+  actual-curator:
+    image: ghcr.io/shaiu/actual-curator:latest
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./curator-data:/data
+    ports:
+      # The API is meant for your LAN or tailnet, not the internet. Bind to a private address if the
+      # host has a public one, e.g. "192.168.1.10:5007:5007".
+      - "5007:5007"

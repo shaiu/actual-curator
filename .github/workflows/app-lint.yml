@@ -1,0 +1,16 @@
+name: app-lint
+
+on:
+  push:
+    paths: ['actual_curator/**', 'repository.yaml']
+  pull_request:
+    paths: ['actual_curator/**', 'repository.yaml']
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: frenck/action-app-linter@v2
+        with:
+          path: ./actual_curator
