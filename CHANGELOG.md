@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1
+
+- Home Assistant app: default host port 8507 instead of 5007, which the Traccar app holds. The
+  port inside the container stays 5007.
+
 ## 0.1.0 — unreleased
 
 First release.

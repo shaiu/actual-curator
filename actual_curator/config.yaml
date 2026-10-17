@@ -1,6 +1,6 @@
 name: Actual Curator
 description: Keeps every new Actual Budget transaction categorized and tagged, and learns rules from your answers
-version: "0.1.0"
+version: "0.1.1"
 slug: actual_curator
 url: https://github.com/shaiu/actual-curator
 arch:
@@ -10,7 +10,7 @@ stage: experimental
 image: ghcr.io/shaiu/actual-curator-ha
 homeassistant_api: true
 ports:
-  5007/tcp: 5007
+  5007/tcp: 8507
 map:
   - type: app_config
     read_only: false
