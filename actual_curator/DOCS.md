@@ -75,7 +75,7 @@ Restart the app after editing.
 
 ## HTTP API
 
-Port 5007, all routes under `/v1`, documented in
+Host port 8507 by default (port 5007 inside the app), all routes under `/v1`, documented in
 [`openapi.yaml`](https://github.com/shaiu/actual-curator/blob/main/openapi.yaml). `GET /v1/health`
 needs no token.
 
@@ -83,6 +83,10 @@ Why a port: assistants, scripts and n8n flows read reports and answer `#review` 
 API, and they usually run outside Home Assistant. Every route except health needs the API token.
 Keep the port on your LAN or tailnet; it is not meant for the internet. To turn it off, clear the
 port in the app's **Network** settings; the curator keeps running.
+
+The default is 8507, not 5007, because the Traccar app listens on many ports in the 5000 range on
+the host network. If 8507 is taken too, Home Assistant reports "port … is already in use" when the
+app starts: set another free port under **Network** and start it again.
 
 ## Known limitations
 

@@ -22,13 +22,13 @@ test('config.yaml exposes every app setting except the two the app fixes', () =>
   for (const k of Object.keys(app.options)) expect(app.schema).toHaveProperty(k);
 });
 
-test('secrets are password fields; version tracks package.json; port 5007', () => {
+test('secrets are password fields; version tracks package.json; host port 8507', () => {
   for (const k of ['actual_password', 'curator_token', 'openrouter_api_key', 'anthropic_api_key', 'openai_api_key', 'telegram_bot_token']) {
     expect(app.schema[k]).toMatch(/^password\??$/);
   }
   expect(app.version).toBe(JSON.parse(readFileSync('package.json', 'utf8')).version);
   expect(app.slug).toBe('actual_curator');
-  expect(app.ports).toEqual({ '5007/tcp': 5007 });
+  expect(app.ports).toEqual({ '5007/tcp': 8507 });
 });
 
 test('config.yaml follows the Home Assistant app guidelines', () => {

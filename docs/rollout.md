@@ -63,7 +63,7 @@ Set `DRY_RUN=false`, restart. For a week:
       created keep working, but their origin is unknown to the app, so it will never delete
       them on a correction. Copy `decisions/` and `rules.json` into the app's `/data` only if
       that matters.
-- [ ] `GET http://<ha-host>:5007/v1/health` answers from the tailnet.
+- [ ] `GET http://<ha-host>:8507/v1/health` answers from the tailnet.
 
 ## 6. Assistant integration
 

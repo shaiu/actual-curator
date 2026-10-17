@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+- The HTTP API's default host port is now 8507. 5007 collided with the Traccar app, which holds
+  many ports in the 5000 range, so the app failed to start with "port 5007 is already in use".
+  If you changed the port under **Network**, your setting is kept. If you use the default, update
+  any assistant or script that called port 5007 on your Home Assistant host.
+
 ## 0.1.0
 
 First release.
