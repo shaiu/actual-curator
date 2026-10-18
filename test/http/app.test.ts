@@ -146,6 +146,15 @@ test('GET /review: oldest first, with the top-3 candidates from the decision log
   expect(body.rows[1].candidates).toEqual([]);
 });
 
+test('GET /review: reviewSince is the latest review decision time, null without one', async () => {
+  store.rows.push(row({ id: 'logged', notes: 'a #auto #review' }), row({ id: 'orphan', notes: 'b #auto #review' }));
+  await log.append({ at: '2026-10-02T00:00:00Z', txId: 'logged', importedPayee: 'X', memo: 'a', amount: -100, kind: 'review',
+    before: { category: null, notes: 'a' }, after: { category: null, notes: 'a #auto #review' }, dryRun: false });
+  const body = await (await app.request('/v1/review', { headers: auth })).json();
+  expect(body.rows.find((r: { id: string }) => r.id === 'logged').reviewSince).toBe('2026-10-02T00:00:00Z');
+  expect(body.rows.find((r: { id: string }) => r.id === 'orphan').reviewSince).toBeNull();
+});
+
 test('POST /curate/run returns the run summary; GET /decisions?since filters', async () => {
   expect(await (await app.request('/v1/curate/run', { method: 'POST', headers: auth })).json()).toEqual(summary);
   await log.append({ at: '2026-10-16T09:00:00Z', txId: 'x', importedPayee: '', memo: '', amount: 0, kind: 'skipped',
