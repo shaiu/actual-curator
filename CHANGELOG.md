@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.6 — a readable money page
+
+- `GET /money`: one phone-sized page, Hebrew (right to left, the default) or English, that says what
+  was spent and what came in this month, how that compares with last month at the same day, where
+  the money went (categories biggest first, as bars), and the watched categories this month against
+  last month. Earlier months are one tap away. Numbers are the reports' numbers: report exclusions
+  apply and refunds reduce a category.
+- The page is served only behind Cloudflare Access. Set `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`; the
+  app verifies the signed-in person's Access token itself (signature, audience, issuer, expiry), so
+  the LAN port does not open it and service tokens do not count as a person. Without both settings
+  the page does not exist.
+- `MONEY_WATCH_CATEGORIES`: category labels or ids for the watched list.
+
 ## 0.1.5 — nothing is filed into a hidden category
 
 - A row that lands in a hidden category goes to review, uncategorized, instead of being accepted as a

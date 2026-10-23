@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6
+
+- New **/money** page: this month's spending in plain words, in Hebrew or English, for your phone.
+  It opens only through Cloudflare Access; set the two Access options to turn it on.
+
 ## 0.1.5
 
 - Spending is never filed into a hidden category. Such a row goes to review instead, and your

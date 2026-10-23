@@ -9,6 +9,7 @@ import type { DecisionLog } from '../log.ts';
 import { hasTag, parseTags, withTags } from '../notes.ts';
 import type { Vocabulary } from '../vocabulary.ts';
 import { bearer } from './auth.ts';
+import { exclusionResolver } from './exclusions.ts';
 import { money } from './format.ts';
 
 export type ApiStore = Pick<ActualStore, 'sync' | 'categories' | 'transactions' | 'transaction' | 'update' | 'rules'
@@ -59,20 +60,7 @@ export function createApp(deps: ApiDeps): Hono {
   app.notFound(c => c.json({ error: { code: 'not_found', message: `No route ${c.req.method} ${c.req.path}` } }, 404));
 
   const labels = async () => new Map((await store.categories({ includeHidden: true })).map(c => [c.id, c.label]));
-  const warned = new Set<string>();
-  /** The configured report exclusions, resolved to ids. A name matching no category is warned about once and skipped. */
-  const exclusions = async (): Promise<{ ids: string[]; labels: string[] }> => {
-    const names = deps.cfg.reportExclude ?? [];
-    if (!names.length) return { ids: [], labels: [] };
-    const cats = await store.categories({ includeHidden: true });
-    const out = { ids: [] as string[], labels: [] as string[] };
-    for (const n of names) {
-      const c = cats.find(x => x.id === n || x.label === n);
-      if (c) { out.ids.push(c.id); out.labels.push(c.label); }
-      else if (!warned.has(n)) { warned.add(n); console.warn(`REPORT_EXCLUDE_CATEGORIES: no category "${n}"; it is not excluded`); }
-    }
-    return out;
-  };
+  const exclusions = exclusionResolver(store, deps.cfg.reportExclude);
   const named = (ex: { labels: string[] }) => (ex.labels.length ? { excluded: ex.labels } : {});
   const view = (r: CuratorRow, lbl: Map<string, string>) => {
     const { memo, tags } = parseTags(r.notes, known);

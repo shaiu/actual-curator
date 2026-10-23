@@ -7,7 +7,10 @@ import { ActualStore } from './actual/store.ts';
 import { createClassifier } from './classifier/index.ts';
 import { loadConfig } from './config.ts';
 import { curate } from './curator/run.ts';
+import { accessVerifier } from './http/access.ts';
 import { createApp } from './http/app.ts';
+import { exclusionResolver } from './http/exclusions.ts';
+import { createMoneyPage } from './http/money.ts';
 import { DecisionLog } from './log.ts';
 import { createNotifier } from './notify.ts';
 import { startScheduler } from './scheduler.ts';
@@ -47,8 +50,13 @@ async function main() {
 
   const app = createApp({ store, log, vocab, cfg, classifierName: classifier.name, runNow: scheduler.runNow,
     status: scheduler.status, versions });
-  const server = serve({ fetch: app.fetch, port: cfg.port, hostname: '0.0.0.0' },
-    info => console.log(`HTTP API on :${info.port}/v1`));
+  const page = createMoneyPage({ store, exclusions: exclusionResolver(store, cfg.reportExclude), watch: cfg.moneyWatch,
+    pending: async () => (await store.transactions({ from: '1970-01-01', to: '9999-12-31', tag: 'review', limit: 10_000 })).length,
+    ...(cfg.access ? { verify: accessVerifier(cfg.access) } : {}) });
+  // /money is its own small app; everything else is the API, with its JSON 404s.
+  const fetch = (req: Request) => (new URL(req.url).pathname === '/money' ? page.fetch(req) : app.fetch(req));
+  const server = serve({ fetch, port: cfg.port, hostname: '0.0.0.0' },
+    info => console.log(`HTTP API on :${info.port}/v1${cfg.access ? ' · /money behind Cloudflare Access' : ''}`));
 
   let closing = false;
   const shutdown = async (signal: string) => {

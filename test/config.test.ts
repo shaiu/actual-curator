@@ -57,3 +57,13 @@ test('report exclusions are a comma-separated list of category labels or ids, em
   expect(loadConfig({ ...base, REPORT_EXCLUDE_CATEGORIES: ' Wants / New house ,, abc-id ' }).reportExclude)
     .toEqual(['Wants / New house', 'abc-id']);
 });
+
+test('the money page needs both Access settings; watched categories are a comma list', () => {
+  expect(loadConfig(base).access).toBeUndefined();
+  expect(loadConfig(base).moneyWatch).toEqual([]);
+  const c = loadConfig({ ...base, ACCESS_TEAM_DOMAIN: ' team.cloudflareaccess.com ', ACCESS_AUD: 'aud',
+    MONEY_WATCH_CATEGORIES: 'Needs / 🛒 Groceries, Wants / 🍽️ Dining out' });
+  expect(c.access).toEqual({ teamDomain: 'team.cloudflareaccess.com', aud: 'aud' });
+  expect(c.moneyWatch).toEqual(['Needs / 🛒 Groceries', 'Wants / 🍽️ Dining out']);
+  expect(() => loadConfig({ ...base, ACCESS_AUD: 'aud' })).toThrow(/ACCESS_TEAM_DOMAIN and ACCESS_AUD/);
+});

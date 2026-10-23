@@ -25,6 +25,10 @@ export type Config = {
   vocabPath: string;
   /** Category labels or ids left out of spend, income and compare reports. */
   reportExclude: string[];
+  /** Cloudflare Access app that fronts /money; without it the page is off. */
+  access?: { teamDomain: string; aud: string };
+  /** Category labels or ids /money shows this month against last month. */
+  moneyWatch: string[];
   notify: { telegram?: { token: string; chatId: string }; haPersistent: boolean };
 };
 
@@ -36,7 +40,7 @@ export const ENV_VARS = [
   'CLASSIFIER_PROVIDER', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'OPENROUTER_BASE_URL',
   'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'OPENAI_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_MODEL',
   'CONFIDENCE_THRESHOLD', 'TAG_THRESHOLD', 'PROMOTE_AFTER', 'RUN_INTERVAL_MINUTES', 'LOOKBACK_DAYS', 'DRY_RUN',
-  'CURRENCY', 'VOCAB_PATH', 'REPORT_EXCLUDE_CATEGORIES', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'NOTIFY_HA_PERSISTENT',
+  'CURRENCY', 'VOCAB_PATH', 'REPORT_EXCLUDE_CATEGORIES', 'ACCESS_TEAM_DOMAIN', 'ACCESS_AUD', 'MONEY_WATCH_CATEGORIES', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'NOTIFY_HA_PERSISTENT',
 ] as const;
 
 const PROVIDERS: ClassifierProvider[] = ['openrouter-jev', 'anthropic', 'openai-compatible'];
@@ -54,6 +58,8 @@ function number(env: Env, name: string, fallback: number): number {
   if (!Number.isFinite(n)) throw new Error(`${name} must be a number, got "${raw}"`);
   return n;
 }
+
+const list = (raw: string | undefined) => (raw ?? '').split(',').map(s => s.trim()).filter(Boolean);
 
 function bool(env: Env, name: string): boolean {
   const raw = env[name]?.trim().toLowerCase();
@@ -89,6 +95,9 @@ export function loadConfig(env: Env): Config {
   const dataDir = required(env, 'DATA_DIR');
   const tgToken = env.TELEGRAM_BOT_TOKEN?.trim();
   const tgChat = env.TELEGRAM_CHAT_ID?.trim();
+  const team = env.ACCESS_TEAM_DOMAIN?.trim();
+  const aud = env.ACCESS_AUD?.trim();
+  if (Boolean(team) !== Boolean(aud)) throw new Error('ACCESS_TEAM_DOMAIN and ACCESS_AUD must be set together');
   if (Boolean(tgToken) !== Boolean(tgChat)) {
     throw new Error('TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set together');
   }
@@ -113,7 +122,9 @@ export function loadConfig(env: Env): Config {
     dryRun: bool(env, 'DRY_RUN'),
     currency: env.CURRENCY?.trim() ?? '',
     vocabPath: env.VOCAB_PATH?.trim() || join(dataDir, 'curator.yaml'),
-    reportExclude: (env.REPORT_EXCLUDE_CATEGORIES ?? '').split(',').map(s => s.trim()).filter(Boolean),
+    reportExclude: list(env.REPORT_EXCLUDE_CATEGORIES),
+    ...(team && aud ? { access: { teamDomain: team, aud } } : {}),
+    moneyWatch: list(env.MONEY_WATCH_CATEGORIES),
     notify: {
       ...(tgToken && tgChat ? { telegram: { token: tgToken, chatId: tgChat } } : {}),
       haPersistent: bool(env, 'NOTIFY_HA_PERSISTENT'),
