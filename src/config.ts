@@ -23,6 +23,8 @@ export type Config = {
   /** ISO code shown to the classifier next to amounts; empty means none. */
   currency: string;
   vocabPath: string;
+  /** Category labels or ids left out of spend, income and compare reports. */
+  reportExclude: string[];
   notify: { telegram?: { token: string; chatId: string }; haPersistent: boolean };
 };
 
@@ -34,7 +36,7 @@ export const ENV_VARS = [
   'CLASSIFIER_PROVIDER', 'OPENROUTER_API_KEY', 'OPENROUTER_MODEL', 'OPENROUTER_BASE_URL',
   'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'OPENAI_BASE_URL', 'OPENAI_API_KEY', 'OPENAI_MODEL',
   'CONFIDENCE_THRESHOLD', 'TAG_THRESHOLD', 'PROMOTE_AFTER', 'RUN_INTERVAL_MINUTES', 'LOOKBACK_DAYS', 'DRY_RUN',
-  'CURRENCY', 'VOCAB_PATH', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'NOTIFY_HA_PERSISTENT',
+  'CURRENCY', 'VOCAB_PATH', 'REPORT_EXCLUDE_CATEGORIES', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'NOTIFY_HA_PERSISTENT',
 ] as const;
 
 const PROVIDERS: ClassifierProvider[] = ['openrouter-jev', 'anthropic', 'openai-compatible'];
@@ -111,6 +113,7 @@ export function loadConfig(env: Env): Config {
     dryRun: bool(env, 'DRY_RUN'),
     currency: env.CURRENCY?.trim() ?? '',
     vocabPath: env.VOCAB_PATH?.trim() || join(dataDir, 'curator.yaml'),
+    reportExclude: (env.REPORT_EXCLUDE_CATEGORIES ?? '').split(',').map(s => s.trim()).filter(Boolean),
     notify: {
       ...(tgToken && tgChat ? { telegram: { token: tgToken, chatId: tgChat } } : {}),
       haPersistent: bool(env, 'NOTIFY_HA_PERSISTENT'),

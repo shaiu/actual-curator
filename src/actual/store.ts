@@ -214,17 +214,19 @@ export class ActualStore {
     return this.locked(() => api.deleteRule(id));
   }
 
-  private async reportRows(from: string, to: string): Promise<Raw[]> {
-    return this.query(api.q('transactions')
+  /** `exclude` holds category ids left out of every report (one-off money such as a house purchase). */
+  private async reportRows(from: string, to: string, exclude: readonly string[] = []): Promise<Raw[]> {
+    const rows = await this.query(api.q('transactions')
       .filter({ ...dateRange(from, to), 'account.offbudget': false, transfer_id: null, is_parent: false })
       .options({ splits: 'all' })
       .select(['amount', 'notes', 'category', 'category.name', 'category.group.id', 'category.group.name',
         'category.group.is_income']));
+    return exclude.length ? rows.filter(r => !exclude.includes(r.category as string)) : rows;
   }
 
   /** Net spend (refunds reduce it), excluding transfers, off-budget accounts and income categories. */
-  async spend(q: { from: string; to: string; by: 'category' | 'group' | 'tag' }): Promise<ReportRow[]> {
-    const rows = (await this.reportRows(q.from, q.to)).filter(r => !r['category.group.is_income']);
+  async spend(q: { from: string; to: string; by: 'category' | 'group' | 'tag'; exclude?: readonly string[] }): Promise<ReportRow[]> {
+    const rows = (await this.reportRows(q.from, q.to, q.exclude)).filter(r => !r['category.group.is_income']);
     const totals = new Map<string | null, ReportRow>();
     const add = (key: string | null, label: string, amount: number) => {
       const t = totals.get(key) ?? { key, label, amount: 0 };
@@ -246,9 +248,9 @@ export class ActualStore {
     return [...totals.values()].sort((a, b) => a.amount - b.amount);
   }
 
-  async income(q: { from: string; to: string }): Promise<ReportRow[]> {
+  async income(q: { from: string; to: string; exclude?: readonly string[] }): Promise<ReportRow[]> {
     const totals = new Map<string, ReportRow>();
-    for (const r of await this.reportRows(q.from, q.to)) {
+    for (const r of await this.reportRows(q.from, q.to, q.exclude)) {
       if (!r['category.group.is_income']) continue;
       const key = r.category as string;
       const t = totals.get(key) ?? { key, label: `${r['category.group.name']} / ${r['category.name']}`, amount: 0 };

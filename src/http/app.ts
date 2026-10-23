@@ -20,7 +20,7 @@ export type ApiDeps = {
   store: ApiStore;
   log: DecisionLog;
   vocab: Vocabulary;
-  cfg: Pick<Config, 'token' | 'currency'>;
+  cfg: Pick<Config, 'token' | 'currency'> & Partial<Pick<Config, 'reportExclude'>>;
   classifierName: string;
   runNow: () => Promise<RunSummary>;
   status: () => ApiStatus;
@@ -59,6 +59,21 @@ export function createApp(deps: ApiDeps): Hono {
   app.notFound(c => c.json({ error: { code: 'not_found', message: `No route ${c.req.method} ${c.req.path}` } }, 404));
 
   const labels = async () => new Map((await store.categories({ includeHidden: true })).map(c => [c.id, c.label]));
+  const warned = new Set<string>();
+  /** The configured report exclusions, resolved to ids. A name matching no category is warned about once and skipped. */
+  const exclusions = async (): Promise<{ ids: string[]; labels: string[] }> => {
+    const names = deps.cfg.reportExclude ?? [];
+    if (!names.length) return { ids: [], labels: [] };
+    const cats = await store.categories({ includeHidden: true });
+    const out = { ids: [] as string[], labels: [] as string[] };
+    for (const n of names) {
+      const c = cats.find(x => x.id === n || x.label === n);
+      if (c) { out.ids.push(c.id); out.labels.push(c.label); }
+      else if (!warned.has(n)) { warned.add(n); console.warn(`REPORT_EXCLUDE_CATEGORIES: no category "${n}"; it is not excluded`); }
+    }
+    return out;
+  };
+  const named = (ex: { labels: string[] }) => (ex.labels.length ? { excluded: ex.labels } : {});
   const view = (r: CuratorRow, lbl: Map<string, string>) => {
     const { memo, tags } = parseTags(r.notes, known);
     return { id: r.id, date: r.date, account: r.account, accountName: r.accountName, payee: r.payee,
@@ -120,12 +135,14 @@ export function createApp(deps: ApiDeps): Hono {
     const q = c.req.query();
     const { from, to } = range(q);
     const by = z.enum(['category', 'group', 'tag']).default('category').parse(q.by);
-    return c.json({ from, to, by, ...report(await store.spend({ from, to, by })) });
+    const ex = await exclusions();
+    return c.json({ from, to, by, ...report(await store.spend({ from, to, by, exclude: ex.ids })), ...named(ex) });
   });
 
   app.get('/report/income', async c => {
     const { from, to } = range(c.req.query());
-    return c.json({ from, to, ...report(await store.income({ from, to })) });
+    const ex = await exclusions();
+    return c.json({ from, to, ...report(await store.income({ from, to, exclude: ex.ids })), ...named(ex) });
   });
 
   app.get('/report/compare', async c => {
@@ -135,15 +152,16 @@ export function createApp(deps: ApiDeps): Hono {
     const [curFrom, prevFrom, prevTo] = period === 'month'
       ? [new Date(Date.UTC(y, m, 1)), new Date(Date.UTC(y, m - 1, 1)), new Date(Date.UTC(y, m, 0))]
       : [new Date(Date.UTC(y, 0, 1)), new Date(Date.UTC(y - 1, 0, 1)), new Date(Date.UTC(y - 1, 11, 31))];
+    const ex = await exclusions();
     const [cur, prev] = await Promise.all([
-      store.spend({ from: iso(curFrom), to: iso(t), by: 'category' }),
-      store.spend({ from: iso(prevFrom), to: iso(prevTo), by: 'category' }),
+      store.spend({ from: iso(curFrom), to: iso(t), by: 'category', exclude: ex.ids }),
+      store.spend({ from: iso(prevFrom), to: iso(prevTo), by: 'category', exclude: ex.ids }),
     ]);
     const keys = new Map<string | null, string>([...prev, ...cur].map(r => [r.key, r.label]));
     const amt = (rows: ReportRow[], k: string | null) => rows.find(r => r.key === k)?.amount ?? 0;
     return c.json({ period, current: { from: iso(curFrom), to: iso(t) }, previous: { from: iso(prevFrom), to: iso(prevTo) },
       rows: [...keys].map(([key, label]) => ({ key, label, current: money(amt(cur, key)), previous: money(amt(prev, key)) }))
-        .sort((a, b) => a.current.amount - b.current.amount) });
+        .sort((a, b) => a.current.amount - b.current.amount), ...named(ex) });
   });
 
   const setBody = z.object({
