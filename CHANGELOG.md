@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.5 — nothing is filed into a hidden category
+
+- A row that lands in a hidden category goes to review, uncategorized, instead of being accepted as a
+  rule hit. This covers a row Actual filed at import and a row a curator-readable rule would file.
+  The classifier is offered the visible categories for it. Before, rules carried over from YNAB
+  filed new spending into categories hidden since, where no budget view showed it, and some mobile
+  clients' overspending badges skip hidden categories. A row someone puts in a hidden category in
+  Actual before the curator's next run is also sent to review.
+- When such a row is answered, each rule that sent it to the hidden category (Actual's payee-id
+  rules included) is pointed at the answer, so the payee's next row lands right at import.
+- `GET /v1/rules` marks each rule with `categoryHidden`. `GET /v1/review` rows carry
+  `reviewReason`, the logged reason the row is in review (e.g. `category Needs / Dentist (hidden)
+  is hidden`).
+- Rows carry `payeeId` internally, the id Actual's own rules match on.
+
 ## 0.1.4 — leave categories out of reports
 
 - New option `REPORT_EXCLUDE_CATEGORIES` (app option `report_exclude_categories`): category labels

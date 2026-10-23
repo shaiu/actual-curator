@@ -18,15 +18,23 @@ export function passingTags(tags: Record<string, number>, vocab: Vocabulary, thr
   return vocab.tags.map(t => t.tag).filter(t => pass.has(t));
 }
 
+/**
+ * `categories` are the visible ones. A row that already sits in any other category (Actual's own rule filed
+ * it, or a rule points there) goes to review: a hidden category is retired, and spending filed into it is
+ * spending nobody sees.
+ */
 export function decide(input: { row: CuratorRow; classification: Classification | undefined; vocab: Vocabulary;
-  thresholds: Thresholds; categories: CategoryOption[] }): DecideResult {
+  thresholds: Thresholds; categories: CategoryOption[]; labels?: Map<string, string> }): DecideResult {
   const { row, classification: c, vocab, thresholds, categories } = input;
   if (!c) return { category: row.category, addTags: [], review: false, kind: 'skipped' };
   const tags = passingTags(c.tags, vocab, thresholds);
-  if (row.category) return { category: row.category, addTags: [...tags, 'auto'], review: false, kind: 'rule-hit' };
-
   const review = (reason: string): DecideResult =>
     ({ category: null, addTags: [...tags, 'auto', 'review'], review: true, kind: 'review', reason });
+  if (row.category && !categories.some(x => x.id === row.category)) {
+    return review(`category ${input.labels?.get(row.category) ?? row.category} is hidden`);
+  }
+  if (row.category) return { category: row.category, addTags: [...tags, 'auto'], review: false, kind: 'rule-hit' };
+
   const payee = (row.importedPayee ?? '').trim().toLocaleLowerCase();
   if (vocab.reviewPayees.some(p => p.trim().toLocaleLowerCase() === payee)) return review(`payee ${payee} is always reviewed`);
   if (!c.category) return review('no category answer');

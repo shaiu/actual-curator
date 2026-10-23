@@ -138,3 +138,14 @@ test('reports leave out excluded categories in every cut; the rows stay searchab
   expect(await store.income({ from: daysAgo(30), to: daysAgo(0), exclude: [fx.ids.salary] })).toEqual([]);
   expect((await store.transactions({ from: daysAgo(30), to: daysAgo(0), category: fx.ids.coffee, limit: 50 })).length).toBeGreaterThan(0);
 });
+
+test('rows carry the payee id; retargetRule repoints a rule and keeps its conditions', async () => {
+  const row = (await store.candidates({ lookbackDays: 60 })).find(r => r.importedPayee === 'ארומה')!;
+  expect(row.payeeId).toEqual(expect.any(String));
+  const id = await store.createRule({ importedPayee: 'RETARGET', categoryId: fx.ids.old });
+  await store.retargetRule(id, fx.ids.groceries);
+  const r = (await store.rules()).find(x => x.id === id)!;
+  expect(r.actions).toEqual([{ field: 'category', op: 'set', value: fx.ids.groceries }]);
+  expect(r.conditions).toEqual([{ field: 'imported_payee', op: 'is', value: 'RETARGET' }]);
+  await store.deleteRule(id);
+});

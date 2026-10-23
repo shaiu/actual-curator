@@ -8,10 +8,10 @@ import type { Decision, DecisionLog } from '../log.ts';
 import { hasTag, parseTags, withTags } from '../notes.ts';
 import type { Vocabulary } from '../vocabulary.ts';
 import { decide } from './decide.ts';
-import { categoryOf, firstMatch, ruleForRow } from './rules.ts';
+import { categoryOf, firstMatch, ruleForRow, staleRulesFor } from './rules.ts';
 
 export type CuratorStore = Pick<ActualStore, 'sync' | 'candidates' | 'categories' | 'rules' | 'priorCategories'
-  | 'update' | 'createRule' | 'replaceRule' | 'deleteRule'>;
+  | 'update' | 'createRule' | 'replaceRule' | 'deleteRule' | 'retargetRule'>;
 
 export type RunSummary = {
   synced: boolean;
@@ -120,6 +120,14 @@ export async function curate(deps: CurateDeps): Promise<RunSummary> {
         } else if (!rule) {
           reason += '; no rule (row has no payee or memo to match on)';
         }
+        // A rule into a hidden category sent this row here; left alone, Actual would file the payee's next row there again.
+        for (const st of staleRulesFor(rules, r, new Set(offered.map(c => c.id)))) {
+          if (!cfg.dryRun) {
+            await store.retargetRule(st.id, r.category);
+            changed = true;
+          }
+          reason += `; rule ${st.id} moved from hidden ${labels.get(categoryOf(st)!) ?? categoryOf(st)}`;
+        }
         await write(r, { kind: 'settled-review', reason,
           after: { category: r.category, notes: withTags(r.notes, [], ['review'], known) } });
         s.settled++;
@@ -175,13 +183,14 @@ export async function curate(deps: CurateDeps): Promise<RunSummary> {
       try {
         // An outflow is never income, so income categories are not even offered for it.
         const choices = r.amount < 0 ? offered.filter(c => !c.isIncome) : offered;
-        classification = await classifier.classify(state, { tags: vocab.tags, ...(r.category ? {} : { categories: choices }) });
+        const known = r.category !== null && offered.some(c => c.id === r.category);
+        classification = await classifier.classify(state, { tags: vocab.tags, ...(known ? {} : { categories: choices }) });
       } catch (e) {
         failed++; s.errors++;
         await log.append({ ...base(original), kind: 'skipped', reason: `classifier: ${(e as Error).message}` });
         continue;
       }
-      const d = decide({ row: r, classification, vocab, thresholds: cfg.thresholds, categories: offered });
+      const d = decide({ row: r, classification, vocab, thresholds: cfg.thresholds, categories: offered, labels });
       const { raw: _raw, ...logged } = classification;
       await write(original, {
         kind: d.kind, after: { category: d.category, notes: withTags(r.notes, d.addTags, [], known) },

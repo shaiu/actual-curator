@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+- Spending is never filed into a hidden category. Such a row goes to review instead, and your
+  answer also fixes the rule that sent it there.
+
 ## 0.1.4
 
 - New option **Leave out of reports**: categories the spend, income and compare reports skip, such

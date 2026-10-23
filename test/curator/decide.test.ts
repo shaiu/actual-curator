@@ -68,3 +68,10 @@ test('a review payee always goes to review, even with a confident answer; a rule
     .toEqual({ category: null, addTags: ['kids', 'auto', 'review'], review: true, kind: 'review', reason: 'payee paybox is always reviewed' });
   expect(run(row({ ...p, category: 'coffee' }), cls(undefined)).kind).toBe('rule-hit');
 });
+
+test('a row already in a hidden category goes to review, uncategorized, naming the category', () => {
+  const r = decide({ row: row({ category: 'old' }), classification: cls(undefined), vocab, thresholds, categories,
+    labels: new Map([['old', 'Needs / Old (hidden)']]) });
+  expect(r).toMatchObject({ category: null, addTags: ['auto', 'review'], review: true, kind: 'review' });
+  expect(r.reason).toBe('category Needs / Old (hidden) is hidden');
+});

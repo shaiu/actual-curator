@@ -29,7 +29,9 @@ class FakeStore implements ApiStore {
   updates: { id: string; fields: object }[] = [];
   syncs = 0;
   async sync() { this.syncs++; }
-  async categories() { return categories; }
+  async categories(o?: { includeHidden?: boolean }) {
+    return o?.includeHidden ? [...categories, { id: 'old', label: 'Needs / Old (hidden)', isIncome: false }] : categories;
+  }
   async transactions(q: { tag?: string; limit: number }) {
     return this.rows.filter(r => !q.tag || (r.notes ?? '').includes(`#${q.tag}`)).slice(0, q.limit);
   }
@@ -128,7 +130,7 @@ test('POST /rules twice with the same conditions yields one rule; DELETE removes
   const b = await (await app.request('/v1/rules', json({ payee: 'ארומה', category: 'dining', origin: 'bootstrap' }))).json();
   expect(b.id).toBe(a.id);
   const list = await (await app.request('/v1/rules', { headers: auth })).json();
-  expect(list.rules).toEqual([{ id: a.id, payee: 'ארומה', category: 'dining', categoryLabel: 'Wants / Dining', origin: 'bootstrap', supported: true,
+  expect(list.rules).toEqual([{ id: a.id, payee: 'ארומה', category: 'dining', categoryLabel: 'Wants / Dining', categoryHidden: false, origin: 'bootstrap', supported: true,
     conditions: expect.any(Array), actions: expect.any(Array) }]);
   expect((await app.request(`/v1/rules/${a.id}`, { method: 'DELETE', headers: auth })).status).toBe(200);
   expect((await app.request(`/v1/rules/${a.id}`, { method: 'DELETE', headers: auth })).status).toBe(404);
@@ -203,4 +205,22 @@ test('with no exclusions configured, reports carry no excluded field', async () 
   const spend = await (await app.request('/v1/report/spend?from=2026-10-01&to=2026-10-31', { headers: auth })).json();
   expect(spend).not.toHaveProperty('excluded');
   expect(store.excludes).toEqual([[]]);
+});
+
+test('GET /rules marks a rule whose category is hidden', async () => {
+  store.ruleList.push({ id: 'h', stage: null, conditionsOp: 'and', conditions: [{ field: 'imported_payee', op: 'is', value: 'X' }],
+    actions: [{ field: 'category', op: 'set', value: 'old' }] });
+  await app.request('/v1/rules', json({ payee: 'ארומה', category: 'coffee' }));
+  const { rules } = await (await app.request('/v1/rules', { headers: auth })).json();
+  expect(rules.find((r: { id: string }) => r.id === 'h')).toMatchObject({ categoryLabel: 'Needs / Old (hidden)', categoryHidden: true });
+  expect(rules.find((r: { id: string }) => r.id !== 'h')).toMatchObject({ categoryHidden: false });
+});
+
+test('GET /review carries why the row is in review', async () => {
+  store.rows.push(row({ id: 'h', notes: 'x #auto #review' }));
+  await log.append({ at: '2026-10-02T00:00:00Z', txId: 'h', importedPayee: 'ארומה', memo: 'x', amount: -2550, kind: 'review',
+    before: { category: 'old', notes: 'x' }, after: { category: null, notes: 'x #auto #review' }, dryRun: false,
+    reason: 'category Needs / Old (hidden) is hidden' });
+  const { rows } = await (await app.request('/v1/review', { headers: auth })).json();
+  expect(rows[0]).toMatchObject({ id: 'h', reviewReason: 'category Needs / Old (hidden) is hidden' });
 });

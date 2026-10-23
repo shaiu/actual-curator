@@ -5,7 +5,7 @@ import type { CuratorRow, CuratorRule, NewCuratorRule, ReportRow, RuleAction, Ru
 
 type Raw = Record<string, unknown>;
 
-const ROW_FIELDS = ['id', 'date', 'account', 'account.name', 'amount', 'payee.name', 'imported_payee', 'notes',
+const ROW_FIELDS = ['id', 'date', 'account', 'account.name', 'amount', 'payee', 'payee.name', 'imported_payee', 'notes',
   'category', 'transfer_id'];
 
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
@@ -18,6 +18,7 @@ function toRow(r: Raw): CuratorRow {
     accountName: (r['account.name'] as string) ?? '',
     amount: r.amount as number,
     payee: (r['payee.name'] as string | null) ?? null,
+    payeeId: (r.payee as string | null) ?? null,
     importedPayee: (r.imported_payee as string | null) ?? null,
     notes: (r.notes as string | null) ?? undefined,
     category: (r.category as string | null) ?? null,
@@ -208,6 +209,16 @@ export class ActualStore {
     await api.updateRule({ id: existing.id, stage: existing.stage, conditionsOp: 'and', conditions: existing.conditions,
       actions: [{ op: 'set', field: 'category', value: r.categoryId }] } as never);
     return existing.id;
+  }
+
+  /** Points every category action of rule `id` at `categoryId`, leaving its conditions as they are. */
+  async retargetRule(id: string, categoryId: string): Promise<void> {
+    return this.locked(async () => {
+      const r = (await this.rules()).find(x => x.id === id);
+      if (!r) return;
+      await api.updateRule({ id: r.id, stage: r.stage, conditionsOp: r.conditionsOp, conditions: r.conditions,
+        actions: r.actions.map(a => (a.field === 'category' && a.op === 'set' ? { ...a, value: categoryId } : a)) } as never);
+    });
   }
 
   async deleteRule(id: string): Promise<boolean> {
