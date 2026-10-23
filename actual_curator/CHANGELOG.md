@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4
+
+- New option **Leave out of reports**: categories the spend, income and compare reports skip, such
+  as a one-off house purchase. The transactions stay searchable.
+
 ## 0.1.3
 
 - Reports and transaction lists now stop at the end date you ask for. Before, they ran to the

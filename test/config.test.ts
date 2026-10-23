@@ -51,3 +51,9 @@ test('ENV_VARS lists every variable loadConfig reads', async () => {
   loadConfig(spy({ ...base, CLASSIFIER_PROVIDER: 'openai-compatible', OPENAI_BASE_URL: 'u', OPENAI_MODEL: 'm' }));
   expect([...read].sort()).toEqual([...ENV_VARS].sort());
 });
+
+test('report exclusions are a comma-separated list of category labels or ids, empty by default', () => {
+  expect(loadConfig(base).reportExclude).toEqual([]);
+  expect(loadConfig({ ...base, REPORT_EXCLUDE_CATEGORIES: ' Wants / New house ,, abc-id ' }).reportExclude)
+    .toEqual(['Wants / New house', 'abc-id']);
+});

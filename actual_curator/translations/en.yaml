@@ -62,6 +62,9 @@ configuration:
   currency:
     name: Currency
     description: ISO code shown to the classifier next to amounts, for example ILS or EUR.
+  report_exclude_categories:
+    name: Leave out of reports
+    description: Categories that spend, income and compare reports skip, comma-separated, written as in Actual (for example "Wants / New house"). For one-off money such as buying a home. The rows stay searchable.
   vocab_path:
     name: Vocabulary file
     description: Tags, hints and generic payees. Created from the example on first start; edit it in this app's config folder.

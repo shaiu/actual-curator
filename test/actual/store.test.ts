@@ -126,3 +126,15 @@ test('date ranges honour `to`: rows after it are excluded from transactions and 
   const spend = await store.spend({ from: daysAgo(30), to: daysAgo(4), by: 'category' });
   expect(spend.find(r => r.key === fx.ids.coffee)?.amount).toBe(-2550 - 1200 - 1000); // the +500 refund (day 2) is out
 });
+
+test('reports leave out excluded categories in every cut; the rows stay searchable', async () => {
+  const exclude = [fx.ids.coffee];
+  const byCat = await store.spend({ from: daysAgo(30), to: daysAgo(0), by: 'category', exclude });
+  expect(byCat.some(r => r.key === fx.ids.coffee)).toBe(false);
+  expect(byCat.find(r => r.key === fx.ids.groceries)?.amount).toBe(-1800 - 2000);
+  expect(await store.spend({ from: daysAgo(30), to: daysAgo(0), by: 'tag', exclude })).toEqual([]); // both #kids rows are coffee
+  expect(await store.spend({ from: daysAgo(30), to: daysAgo(0), by: 'group', exclude }))
+    .toEqual([{ key: fx.ids.needs, label: 'Needs', amount: -1800 - 2000 }]);
+  expect(await store.income({ from: daysAgo(30), to: daysAgo(0), exclude: [fx.ids.salary] })).toEqual([]);
+  expect((await store.transactions({ from: daysAgo(30), to: daysAgo(0), category: fx.ids.coffee, limit: 50 })).length).toBeGreaterThan(0);
+});

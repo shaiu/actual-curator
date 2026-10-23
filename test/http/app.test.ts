@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeEach, expect, test } from 'vitest';
+import { beforeEach, expect, test, vi } from 'vitest';
 import { parse } from 'yaml';
 import type { CuratorRow, CuratorRule, NewCuratorRule, ReportRow } from '../../src/actual/types.ts';
 import type { CategoryOption } from '../../src/classifier/types.ts';
@@ -55,8 +55,9 @@ class FakeStore implements ApiStore {
     this.ruleList = this.ruleList.filter(r => r.id !== id);
     return this.ruleList.length < before;
   }
-  async spend() { return this.spendRows; }
-  async income() { return [{ key: 'sal', label: 'Income / Salary', amount: 1500000 }]; }
+  excludes: (readonly string[] | undefined)[] = [];
+  async spend(q: { exclude?: readonly string[] }) { this.excludes.push(q.exclude); return this.spendRows; }
+  async income(q: { exclude?: readonly string[] }) { this.excludes.push(q.exclude); return [{ key: 'sal', label: 'Income / Salary', amount: 1500000 }]; }
 }
 
 const summary: RunSummary = { synced: true, ok: true, seen: 2, ruleHits: 1, classified: 1, review: 0, settled: 0,
@@ -180,4 +181,26 @@ test('a failed transaction write gets an error line after the settled-review cla
   err.mockRestore();
   expect(r.status).toBe(500);
   expect(await log.lastFor('f1')).toMatchObject({ kind: 'error', reason: expect.stringContaining('write failed') });
+});
+
+test('reports pass the configured exclusions to the store as ids and name them in the reply', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const ex = createApp({ store, log, vocab, cfg: { token: 'secret', currency: 'ILS', reportExclude: ['Wants / Gifts', 'dining', 'Nope / Typo'] },
+    classifierName: 'fake', runNow: async () => summary, versions: { curator: '0', actualApi: '0', server: '0' },
+    status: () => ({}), now: () => new Date('2026-10-16T12:00:00Z') });
+  const spend = await (await ex.request('/v1/report/spend?from=2026-10-01&to=2026-10-31', { headers: auth })).json();
+  expect(spend.excluded).toEqual(['Wants / Gifts', 'Wants / Dining']);
+  const income = await (await ex.request('/v1/report/income?from=2026-10-01&to=2026-10-31', { headers: auth })).json();
+  expect(income.excluded).toEqual(['Wants / Gifts', 'Wants / Dining']);
+  const cmp = await (await ex.request('/v1/report/compare', { headers: auth })).json();
+  expect(cmp.excluded).toEqual(['Wants / Gifts', 'Wants / Dining']);
+  expect(store.excludes).toEqual(Array(4).fill(['gifts', 'dining']));
+  expect(warn).toHaveBeenCalledWith(expect.stringContaining('Nope / Typo'));
+  warn.mockRestore();
+});
+
+test('with no exclusions configured, reports carry no excluded field', async () => {
+  const spend = await (await app.request('/v1/report/spend?from=2026-10-01&to=2026-10-31', { headers: auth })).json();
+  expect(spend).not.toHaveProperty('excluded');
+  expect(store.excludes).toEqual([[]]);
 });

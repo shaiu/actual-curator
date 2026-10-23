@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4 — leave categories out of reports
+
+- New option `REPORT_EXCLUDE_CATEGORIES` (app option `report_exclude_categories`): category labels
+  or ids, comma-separated. The spend, income and compare reports skip those categories in every
+  cut (category, group, tag) and in their totals, and name them in an `excluded` field. Use it for
+  one-off money, such as a house purchase, that would swamp a monthly total. `/v1/transactions`
+  still finds the rows. A name that matches no category is logged once and ignored.
+
 ## 0.1.3 — date ranges honour `to`
 
 - `/v1/transactions` and the spend, income and compare reports ignored the end of a date range:
