@@ -65,6 +65,15 @@ configuration:
   report_exclude_categories:
     name: Leave out of reports
     description: Categories that spend, income and compare reports skip, comma-separated, written as in Actual (for example "Wants / New house"). For one-off money such as buying a home. The rows stay searchable.
+  access_team_domain:
+    name: Cloudflare Access team domain
+    description: Turns on the /money page, for example yourteam.cloudflareaccess.com. The page only opens for people Cloudflare Access signed in, and the app checks their sign-in itself.
+  access_aud:
+    name: Cloudflare Access application tag
+    description: The AUD tag of the Access application in front of this app (Zero Trust → Access → Applications → the app → Overview).
+  money_watch_categories:
+    name: Watched categories
+    description: Shown on /money this month against last month, comma-separated as in Actual (for example "Needs / Groceries, Wants / Dining out").
   vocab_path:
     name: Vocabulary file
     description: Tags, hints and generic payees. Created from the example on first start; edit it in this app's config folder.

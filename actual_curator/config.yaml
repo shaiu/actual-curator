@@ -1,6 +1,6 @@
 name: Actual Curator
 description: Keeps every new Actual Budget transaction categorized and tagged, and learns rules from your answers
-version: "0.1.5"
+version: "0.1.6"
 slug: actual_curator
 url: https://github.com/shaiu/actual-curator
 arch:
@@ -52,6 +52,9 @@ schema:
   currency: str?
   vocab_path: str
   report_exclude_categories: str?
+  access_team_domain: str?
+  access_aud: str?
+  money_watch_categories: str?
   telegram_bot_token: password?
   telegram_chat_id: str?
   notify_ha_persistent: bool
