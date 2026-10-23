@@ -117,3 +117,12 @@ test('update with an expected state that no longer holds throws StaleRowError an
   await store.update(r.id, { notes: 'salary' }, { category: r.category, notes: 'salary x' });
   expect((await store.transaction(r.id))?.notes).toBe('salary');
 });
+
+test('date ranges honour `to`: rows after it are excluded from transactions and reports', async () => {
+  const dates = (await store.transactions({ from: daysAgo(30), to: daysAgo(5), limit: 50 })).map(r => r.date);
+  expect(dates.length).toBeGreaterThan(0);
+  expect(dates.filter(d => d < daysAgo(30) || d > daysAgo(5))).toEqual([]);
+  expect(await store.income({ from: daysAgo(30), to: daysAgo(8) })).toEqual([]);
+  const spend = await store.spend({ from: daysAgo(30), to: daysAgo(4), by: 'category' });
+  expect(spend.find(r => r.key === fx.ids.coffee)?.amount).toBe(-2550 - 1200 - 1000); // the +500 refund (day 2) is out
+});

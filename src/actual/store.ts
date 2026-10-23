@@ -116,7 +116,7 @@ export class ActualStore {
 
   async transactions(q: { from: string; to: string; category?: string; tag?: string; account?: string;
     text?: string; limit: number }): Promise<CuratorRow[]> {
-    const filter: Raw = { date: { $gte: q.from, $lte: q.to }, is_parent: false };
+    const filter: Raw = { ...dateRange(q.from, q.to), is_parent: false };
     if (q.category) filter.category = q.category;
     if (q.account) filter.account = q.account;
     if (q.tag) filter.notes = { $like: `%#${q.tag}%` };
@@ -216,7 +216,7 @@ export class ActualStore {
 
   private async reportRows(from: string, to: string): Promise<Raw[]> {
     return this.query(api.q('transactions')
-      .filter({ date: { $gte: from, $lte: to }, 'account.offbudget': false, transfer_id: null, is_parent: false })
+      .filter({ ...dateRange(from, to), 'account.offbudget': false, transfer_id: null, is_parent: false })
       .options({ splits: 'all' })
       .select(['amount', 'notes', 'category', 'category.name', 'category.group.id', 'category.group.name',
         'category.group.is_income']));
@@ -257,6 +257,14 @@ export class ActualStore {
     }
     return [...totals.values()].sort((a, b) => b.amount - a.amount);
   }
+}
+
+/**
+ * Inclusive date range. Actual's AQL keeps only one operator of `{ date: { $gte, $lte } }` and
+ * silently drops `$lte`, so each bound is its own condition.
+ */
+function dateRange(from: string, to: string): Raw {
+  return { $and: [{ date: { $gte: from } }, { date: { $lte: to } }] };
 }
 
 /** Every trailing `#word` token: reports slice by any tag the user wrote, not only the vocabulary. */
