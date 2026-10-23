@@ -6,6 +6,8 @@ export type CuratorRow = {
   /** Signed, minor units. */
   amount: number;
   payee: string | null;
+  /** Actual's payee id: Actual's own rules match on it. */
+  payeeId?: string | null;
   importedPayee: string | null;
   notes: string | undefined;
   category: string | null;

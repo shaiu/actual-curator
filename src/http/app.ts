@@ -125,7 +125,7 @@ export function createApp(deps: ApiDeps): Hono {
         .map(([id, p]) => ({ id, label: lbl.get(id) ?? id, p }));
       const since = await log.lastFor(r.id, x => x.kind === 'review');
       const rule = ruleForRow(r, '', vocab);
-      out.push({ ...view(r, lbl), candidates, reviewSince: since?.at ?? null,
+      out.push({ ...view(r, lbl), candidates, reviewSince: since?.at ?? null, reviewReason: since?.reason ?? null,
         rule: rule ? { payee: rule.importedPayee, ...(rule.notesContains ? { notesContains: rule.notesContains } : {}) } : null });
     }
     return c.json({ rows: out });
@@ -213,18 +213,19 @@ export function createApp(deps: ApiDeps): Hono {
     return c.json({ transaction: view({ ...row, category, notes }, lbl), ...(ruleId ? { ruleId } : {}) });
   });
 
-  const ruleView = async (r: CuratorRule, lbl: Map<string, string>) => {
+  const ruleView = async (r: CuratorRule, lbl: Map<string, string>, visible?: Set<string>) => {
     const payee = r.conditions.find(x => x.field === 'imported_payee' && x.op === 'is')?.value;
     const notesContains = r.conditions.find(x => x.field === 'notes' && x.op === 'contains')?.value;
     const category = categoryOf(r);
     return { id: r.id, ...(payee !== undefined ? { payee } : {}), ...(notesContains !== undefined ? { notesContains } : {}),
-      ...(category ? { category, categoryLabel: lbl.get(category) } : {}),
+      ...(category ? { category, categoryLabel: lbl.get(category), ...(visible ? { categoryHidden: !visible.has(category) } : {}) } : {}),
       origin: (await log.rules.originOf(r.id)) ?? null, supported: isSupported(r), conditions: r.conditions, actions: r.actions };
   };
 
   app.get('/rules', async c => {
     const lbl = await labels();
-    return c.json({ rules: await Promise.all((await store.rules()).map(r => ruleView(r, lbl))) });
+    const visible = new Set((await store.categories()).map(x => x.id));
+    return c.json({ rules: await Promise.all((await store.rules()).map(r => ruleView(r, lbl, visible))) });
   });
 
   app.post('/rules', async c => {

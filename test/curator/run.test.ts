@@ -19,6 +19,7 @@ const cfg = { thresholds: { category: 0.95, tagDefault: 0.7, exclusive: 0.7 }, p
   dryRun: false, currency: 'ILS' };
 const categories: CategoryOption[] = [{ id: 'coffee', label: 'Needs / Coffee', isIncome: false },
   { id: 'gifts', label: 'Wants / Gifts', isIncome: false }, { id: 'salary', label: 'Income / Salary', isIncome: true }];
+const hiddenCat: CategoryOption = { id: 'old', label: 'Needs / Old (hidden)', isIncome: false };
 const now = () => new Date('2026-10-16T10:00:00Z');
 
 let n = 0;
@@ -31,6 +32,7 @@ class FakeStore implements CuratorStore {
   updates: { id: string; fields: { category?: string | null; notes?: string } }[] = [];
   created: (NewCuratorRule & { id: string })[] = [];
   deleted: string[] = [];
+  retargeted: { id: string; categoryId: string }[] = [];
   syncFails = false;
   syncs = 0;
   rows: CuratorRow[];
@@ -38,7 +40,7 @@ class FakeStore implements CuratorStore {
   constructor(rows: CuratorRow[], ruleList: CuratorRule[] = []) { this.rows = rows; this.ruleList = ruleList; }
   async sync() { this.syncs++; this.events.push('sync'); if (this.syncFails) throw new Error('server down'); }
   async candidates() { return this.rows; }
-  async categories() { return categories; }
+  async categories(o?: { includeHidden?: boolean }) { return o?.includeHidden ? [...categories, hiddenCat] : categories; }
   async rules() { return this.ruleList; }
   async priorCategories() { return ['coffee']; }
   async update(id: string, fields: { category?: string | null; notes?: string },
@@ -50,6 +52,7 @@ class FakeStore implements CuratorStore {
   }
   async replaceRule(r: NewCuratorRule) { return this.createRule(r); }
   async deleteRule(id: string) { this.deleted.push(id); return true; }
+  async retargetRule(id: string, categoryId: string) { this.retargeted.push({ id, categoryId }); }
 }
 
 const offeredIds: string[][] = [];
@@ -268,4 +271,34 @@ test('a rule created while settling is used for the same payee in the same run',
   await curate({ store, log, vocab, cfg, now, classifier: c });
   expect(c.calls).toEqual([{ payee: 'X', withCategory: false }]);
   expect(store.updates.find(u => u.id === later.id)?.fields).toMatchObject({ category: 'gifts' });
+});
+
+// 2026-10-23: Actual's own payee rules, carried over from YNAB, filed new rows into categories
+// hidden since. Nobody saw the spending, and Actuali's overspent badge skips hidden categories.
+test('a row Actual filed into a hidden category goes to review, uncategorized, with candidates', async () => {
+  const { store, log } = setup([row({ id: 'h1', category: 'old', notes: 'm' })]);
+  const c = classifier(() => ({ category: { id: 'coffee', confidence: 0.99, probabilities: { coffee: 0.99 } }, tags: { kids: 0 }, raw: null }));
+  const s = await curate({ store, log, vocab, cfg, now, classifier: c });
+  expect(c.calls).toEqual([{ payee: 'ארומה', withCategory: true }]);
+  expect(store.updates[0].fields).toEqual({ category: null, notes: 'm #auto #review' });
+  expect(s.review).toBe(1); expect(s.ruleHits).toBe(0);
+  expect(await log.lastFor('h1')).toMatchObject({ kind: 'review', reason: 'category Needs / Old (hidden) is hidden' });
+});
+
+test('a curator rule pointing at a hidden category does not file the row there', async () => {
+  const rule: CuratorRule = { id: 'r1', stage: null, conditionsOp: 'and',
+    conditions: [{ field: 'imported_payee', op: 'is', value: 'ארומה' }], actions: [{ field: 'category', op: 'set', value: 'old' }] };
+  const { store, log } = setup([row({ notes: 'm' })], [rule]);
+  await curate({ store, log, vocab, cfg, now, classifier: classifier(() => tagsOnly()) });
+  expect(store.updates[0].fields).toEqual({ notes: 'm #auto #review' }); // the row was uncategorized; it stays so
+});
+
+test('answering a row a stale rule sent to review points that rule at the answer', async () => {
+  const stale: CuratorRule = { id: 's1', stage: null, conditionsOp: 'and', conditions: [{ field: 'payee', op: 'is', value: 'p-aroma' }],
+    actions: [{ field: 'category', op: 'set', value: 'old' }] };
+  const other: CuratorRule = { ...stale, id: 's2', conditions: [{ field: 'payee', op: 'is', value: 'p-else' }] };
+  const { store, log } = setup([row({ id: 'a1', payeeId: 'p-aroma', category: 'coffee', notes: 'm #auto #review' })], [stale, other]);
+  await curate({ store, log, vocab, cfg, now, classifier: classifier(() => tagsOnly()) });
+  expect(store.retargeted).toEqual([{ id: 's1', categoryId: 'coffee' }]);
+  expect((await log.lastFor('a1'))?.reason).toContain('rule s1 moved from hidden Needs / Old (hidden)');
 });

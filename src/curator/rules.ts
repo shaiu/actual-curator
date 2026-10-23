@@ -24,6 +24,23 @@ export function matchRule(rule: CuratorRule, row: CuratorRow): boolean {
     : norm(row.notes).includes(norm(c.value)));
 }
 
+/**
+ * Rules that point this row at a category outside `visible` (a hidden one). Unlike matchRule this also reads
+ * Actual's own payee-id conditions, the shape YNAB-era rules have, since those are the ones Actual runs at import.
+ */
+export function staleRulesFor(rules: CuratorRule[], row: CuratorRow, visible: Set<string>): CuratorRule[] {
+  return rules.filter(r => {
+    const cat = categoryOf(r);
+    if (r.conditionsOp !== 'and' || !r.conditions.length || cat === undefined || visible.has(cat)) return false;
+    return r.conditions.every(c => {
+      if (c.field === 'payee' && c.op === 'is') return Boolean(row.payeeId) && c.value === row.payeeId;
+      if (c.field === 'imported_payee' && c.op === 'is') return norm(row.importedPayee) === norm(c.value);
+      if (c.field === 'notes' && c.op === 'contains') return norm(row.notes).includes(norm(c.value));
+      return false;
+    });
+  });
+}
+
 /** The most specific matching rule (most conditions), so a payee + memo rule beats a bare payee rule. */
 export function firstMatch(rules: CuratorRule[], row: CuratorRow): CuratorRule | undefined {
   return [...rules].sort((a, b) => b.conditions.length - a.conditions.length).find(r => matchRule(r, row));
