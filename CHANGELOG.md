@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3 — date ranges honour `to`
+
+- `/v1/transactions` and the spend, income and compare reports ignored the end of a date range:
+  Actual's query language kept only `$gte` from `{ date: { $gte, $lte } }`. A range now runs from
+  `from` to `to` inclusive. Before, every report ran from `from` to the newest row, so a
+  "June to August" total included September onwards, and a page of transactions for January
+  started with the newest rows.
+
 ## 0.1.2 — reviewSince on /v1/review rows
 
 - Each `/v1/review` row carries `reviewSince`: when it was put in review, from the decision log

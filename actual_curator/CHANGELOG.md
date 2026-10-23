@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3
+
+- Reports and transaction lists now stop at the end date you ask for. Before, they ran to the
+  newest transaction.
+
 ## 0.1.2
 
 - `/v1/review` rows now say when they were put in review (`reviewSince`).
