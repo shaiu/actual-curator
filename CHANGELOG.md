@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.7 — the monthly budget
+
+- `GET /v1/budget/:month`: one budget month, synced first — to-budget, totals, and every visible
+  category's budgeted, spent, balance, carryover and an `overspent` flag. A failed sync is an error,
+  not a stale month.
+- `POST /v1/budget/:month`: set up to 50 categories' budgeted amounts. Every item is checked before
+  anything is written (unknown, hidden or income category, a label that is not the category's
+  current one, a repeated category, a month more than 12 ahead), and the answer is the month read
+  back. A failed write puts every item back. Actual's own `setBudgetAmount` answers success for a
+  month with no budget and for an unknown category, which is why the read-back is the proof.
+- `POST /v1/budget/:month/carryover` and `POST /v1/budget/:month/hold`, with the same checks. A hold
+  larger than what can be held is refused: Actual answers success for it.
+
 ## 0.1.6 — a readable money page
 
 - `GET /money`: one phone-sized page, Hebrew (right to left, the default) or English, that says what

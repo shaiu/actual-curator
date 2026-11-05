@@ -60,6 +60,12 @@ class FakeStore implements ApiStore {
   excludes: (readonly string[] | undefined)[] = [];
   async spend(q: { exclude?: readonly string[] }) { this.excludes.push(q.exclude); return this.spendRows; }
   async income(q: { exclude?: readonly string[] }) { this.excludes.push(q.exclude); return [{ key: 'sal', label: 'Income / Salary', amount: 1500000 }]; }
+  // The budget routes run against a real scratch budget in budget.test.ts.
+  budgetMonths(): never { throw new Error('not in this fake'); }
+  budgetMonth(): never { throw new Error('not in this fake'); }
+  setBudgets(): never { throw new Error('not in this fake'); }
+  setCarryover(): never { throw new Error('not in this fake'); }
+  holdForNextMonth(): never { throw new Error('not in this fake'); }
 }
 
 const summary: RunSummary = { synced: true, ok: true, seen: 2, ruleHits: 1, classified: 1, review: 0, settled: 0,

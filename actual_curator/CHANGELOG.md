@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.7
+
+- Assistants can read and set the monthly budget: what is left to budget, each category's budget
+  and spending, rollover, and holding money for next month.
+
 ## 0.1.6
 
 - New **/money** page: this month's spending in plain words, in Hebrew or English, for your phone.

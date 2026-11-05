@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { type ActualStore, StaleRowError } from '../actual/store.ts';
-import type { CuratorRow, CuratorRule, ReportRow, RuleOrigin } from '../actual/types.ts';
+import { type ActualStore, BudgetWriteError, StaleRowError } from '../actual/store.ts';
+import type { BudgetCategory, BudgetMonth, CuratorRow, CuratorRule, ReportRow, RuleOrigin } from '../actual/types.ts';
 import type { Config } from '../config.ts';
 import { categoryOf, isSupported, ruleForRow } from '../curator/rules.ts';
 import type { RunSummary } from '../curator/run.ts';
@@ -11,9 +11,11 @@ import type { Vocabulary } from '../vocabulary.ts';
 import { bearer } from './auth.ts';
 import { exclusionResolver } from './exclusions.ts';
 import { money } from './format.ts';
+import { sameLabel } from './labels.ts';
 
 export type ApiStore = Pick<ActualStore, 'sync' | 'categories' | 'transactions' | 'transaction' | 'update' | 'rules'
-  | 'replaceRule' | 'deleteRule' | 'spend' | 'income'>;
+  | 'replaceRule' | 'deleteRule' | 'spend' | 'income' | 'budgetMonths' | 'budgetMonth' | 'setBudgets' | 'setCarryover'
+  | 'holdForNextMonth'>;
 
 export type ApiStatus = { lastSyncAt?: string; lastRunAt?: string; lastRunOk?: boolean };
 
@@ -27,7 +29,14 @@ export type ApiDeps = {
   status: () => ApiStatus;
   versions: { curator: string; actualApi: string; server: string };
   now?: () => Date;
+  /** The zone "this month" is read in, for the budget's months-ahead limit. Defaults to the process's own. */
+  timeZone?: string;
 };
+
+/** How far ahead a budget may be written, in months. */
+export const BUDGET_MAX_AHEAD = 12;
+/** Most items one budget write may carry. */
+export const BUDGET_MAX_ITEMS = 50;
 
 class ApiError extends Error {
   readonly status: 400 | 404;
@@ -39,6 +48,10 @@ class ApiError extends Error {
   }
 }
 
+const monthParam = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'expected YYYY-MM');
+/** Minor units: a non-negative safe integer. */
+const minor = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+const monthIndex = (m: string) => Number(m.slice(0, 4)) * 12 + Number(m.slice(5, 7)) - 1;
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -50,6 +63,7 @@ export function createApp(deps: ApiDeps): Hono {
 
   app.onError((err, c) => {
     if (err instanceof ApiError) return c.json({ error: { code: err.code, message: err.message } }, err.status);
+    if (err instanceof BudgetWriteError) return c.json({ error: { code: 'budget_write_failed', message: err.message } }, 500);
     if (err instanceof StaleRowError) return c.json({ error: { code: 'conflict', message: `${err.message}; read it again` } }, 409);
     if (err instanceof z.ZodError) {
       return c.json({ error: { code: 'bad_request', message: err.issues.map(i => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ') } }, 400);
@@ -75,7 +89,10 @@ export function createApp(deps: ApiDeps): Hono {
     return z.object({ from: day.default(`${iso(today).slice(0, 7)}-01`), to: day.default(iso(today)) }).parse(q);
   };
   /** Push a human change to the server now; a failure only delays it to the next run's sync. */
-  const push = () => store.sync().catch(e => console.error(`sync after API write failed: ${(e as Error).message}`));
+  const push = () => store.sync().then(() => true, e => {
+    console.error(`sync after API write failed: ${(e as Error).message}`);
+    return false;
+  });
   const reviewRows = () => store.transactions({ from: '1970-01-01', to: iso(now()), tag: 'review', limit: 10_000 });
 
   app.get('/health', async c => {
@@ -234,6 +251,111 @@ export function createApp(deps: ApiDeps): Hono {
     await log.rules.forget(id);
     await push();
     return c.json({ deleted: id });
+  });
+
+  // ---- The monthly budget -------------------------------------------------------------------
+  // Actual's budget writes answer success for a month with no budget and for an unknown category
+  // (measured on 26.10.0), so every input is checked here against a freshly synced month before
+  // anything is written, and every answer is the month read back afterwards — never the request.
+
+  const thisMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: deps.timeZone, year: 'numeric', month: '2-digit' })
+    .format(now()).slice(0, 7);
+  /** Syncs, then reads the month. A failed sync is an error: a stale budget must not read as the budget. */
+  const freshMonth = async (raw: string): Promise<BudgetMonth> => {
+    const month = monthParam.parse(raw);
+    await store.sync();
+    if (!(await store.budgetMonths()).includes(month)) {
+      throw new ApiError(400, 'bad_request', `Actual holds no budget for ${month}`);
+    }
+    return store.budgetMonth(month);
+  };
+  const writableMonth = async (raw: string): Promise<BudgetMonth> => {
+    const month = monthParam.parse(raw);
+    const ahead = monthIndex(month) - monthIndex(thisMonth());
+    if (ahead > BUDGET_MAX_AHEAD) {
+      throw new ApiError(400, 'bad_request', `${month} is ${ahead} months ahead; budgets are written at most ${BUDGET_MAX_AHEAD} ahead`);
+    }
+    return freshMonth(month);
+  };
+  const catView = (c: BudgetCategory) => ({ id: c.id, label: c.label, isIncome: c.isIncome, budgeted: money(c.budgeted),
+    spent: money(c.spent), balance: money(c.balance), carryover: c.carryover, overspent: c.balance < 0 });
+  const monthView = (m: BudgetMonth) => ({
+    month: m.month, toBudget: money(m.toBudget), totalBudgeted: money(m.totalBudgeted), totalSpent: money(m.totalSpent),
+    totalBalance: money(m.totalBalance), totalIncome: money(m.totalIncome), forNextMonth: money(m.forNextMonth),
+    groups: m.groups.filter(g => !g.hidden).map(g => ({ id: g.id, name: g.name, isIncome: g.isIncome,
+      categories: g.categories.filter(c => !c.hidden).map(catView) })),
+  });
+  const allCats = (m: BudgetMonth) => new Map(m.groups.flatMap(g => g.categories).map(c => [c.id, c]));
+  /** Why this category cannot take a budget write, or undefined when it can. */
+  const refusal = (c: BudgetCategory | undefined, id: string, expectLabel: string): string | undefined => {
+    if (!c) return `${id} is not a category`;
+    if (c.hidden) return `${c.label} is hidden`;
+    if (c.isIncome) return `${c.label} is an income category, which has no budget`;
+    if (!sameLabel(expectLabel, c.label)) return `${id} is "${c.label}", not "${expectLabel}"`;
+    return undefined;
+  };
+
+  app.get('/budget/:month', async c => c.json(monthView(await freshMonth(c.req.param('month')))));
+
+  const budgetBody = z.object({
+    items: z.array(z.object({ category: z.string().min(1), expectLabel: z.string().trim().min(1), amount: minor }))
+      .min(1).max(BUDGET_MAX_ITEMS),
+  });
+
+  app.post('/budget/:month', async c => {
+    const { items } = budgetBody.parse(await c.req.json().catch(() => ({})));
+    const before = await writableMonth(c.req.param('month'));
+    const cats = allCats(before);
+    const problems: string[] = [];
+    const seen = new Set<string>();
+    items.forEach((x, i) => {
+      const why = seen.has(x.category) ? `${x.category} appears more than once` : refusal(cats.get(x.category), x.category, x.expectLabel);
+      seen.add(x.category);
+      if (why) problems.push(`items.${i}: ${why}`);
+    });
+    if (problems.length) throw new ApiError(400, 'bad_request', `Nothing was written. ${problems.join('; ')}`);
+
+    await store.setBudgets(before.month, items.map(x => ({ category: x.category, amount: x.amount })),
+      items.map(x => ({ category: x.category, amount: cats.get(x.category)!.budgeted })));
+    const synced = await push();
+    const after = await store.budgetMonth(before.month);
+    const stored = allCats(after);
+    return c.json({
+      month: before.month,
+      items: items.map(x => ({ category: x.category, label: cats.get(x.category)!.label,
+        before: money(cats.get(x.category)!.budgeted), after: money(stored.get(x.category)?.budgeted ?? 0) })),
+      toBudget: money(after.toBudget),
+      synced,
+    });
+  });
+
+  app.post('/budget/:month/carryover', async c => {
+    const b = z.object({ category: z.string().min(1), expectLabel: z.string().trim().min(1), carryover: z.boolean() })
+      .parse(await c.req.json().catch(() => ({})));
+    const before = await writableMonth(c.req.param('month'));
+    const cat = allCats(before).get(b.category);
+    const why = refusal(cat, b.category, b.expectLabel);
+    if (why) throw new ApiError(400, 'bad_request', `Nothing was written. ${why}`);
+    await store.setCarryover(before.month, b.category, b.carryover);
+    const synced = await push();
+    const after = allCats(await store.budgetMonth(before.month)).get(b.category);
+    return c.json({ month: before.month, category: b.category, label: cat!.label, before: cat!.carryover,
+      after: after?.carryover ?? null, synced });
+  });
+
+  app.post('/budget/:month/hold', async c => {
+    const b = z.object({ amount: minor }).parse(await c.req.json().catch(() => ({})));
+    const before = await writableMonth(c.req.param('month'));
+    // A new hold replaces the old one, so what can be held is to-budget plus what is already held.
+    const available = before.toBudget + before.forNextMonth;
+    if (b.amount > available) {
+      throw new ApiError(400, 'bad_request', `Nothing was written. Only ${money(Math.max(available, 0)).formatted} can be held in ${before.month}`);
+    }
+    await store.holdForNextMonth(before.month, b.amount);
+    const synced = await push();
+    const after = await store.budgetMonth(before.month);
+    return c.json({ month: before.month, before: money(before.forNextMonth), after: money(after.forNextMonth),
+      toBudget: money(after.toBudget), synced });
   });
 
   app.post('/curate/run', async c => c.json(await deps.runNow()));

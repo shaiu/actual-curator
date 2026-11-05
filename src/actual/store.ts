@@ -1,7 +1,7 @@
 import * as api from '@actual-app/api';
 import type { CategoryOption } from '../classifier/types.ts';
 import { parseTags } from '../notes.ts';
-import type { CuratorRow, CuratorRule, NewCuratorRule, ReportRow, RuleAction, RuleCondition } from './types.ts';
+import type { BudgetMonth, CuratorRow, CuratorRule, NewCuratorRule, ReportRow, RuleAction, RuleCondition } from './types.ts';
 
 type Raw = Record<string, unknown>;
 
@@ -40,6 +40,14 @@ export class StaleRowError extends Error {
   constructor(id: string) {
     super(`transaction ${id} changed since it was read`);
     this.name = 'StaleRowError';
+  }
+}
+
+/** A budget write failed; the message says whether the previous amounts were put back. */
+export class BudgetWriteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BudgetWriteError';
   }
 }
 
@@ -223,6 +231,117 @@ export class ActualStore {
 
   async deleteRule(id: string): Promise<boolean> {
     return this.locked(() => api.deleteRule(id));
+  }
+
+  /** Every month Actual holds a budget for, oldest first (measured on 26.10.0: six back to eleven ahead). */
+  async budgetMonths(): Promise<string[]> {
+    return api.getBudgetMonths();
+  }
+
+  /**
+   * One month of the budget, hidden groups and categories included and flagged: the caller decides
+   * what to show. Throws for a month Actual holds no budget for. Envelope budgeting only: a tracking
+   * budget has no `toBudget`, and that is an error rather than a zero.
+   */
+  async budgetMonth(month: string): Promise<BudgetMonth> {
+    const m = await api.getBudgetMonth(month);
+    if (typeof m.toBudget !== 'number') throw new Error(`month ${month} has no toBudget: the budget is not envelope budgeting`);
+    return {
+      month: m.month,
+      toBudget: m.toBudget,
+      // Actual reports total-budgeted as a negative sheet value; the sum of what was budgeted is its negation.
+      totalBudgeted: -m.totalBudgeted,
+      totalSpent: m.totalSpent,
+      totalBalance: m.totalBalance,
+      totalIncome: m.totalIncome,
+      forNextMonth: m.forNextMonth,
+      groups: m.categoryGroups.map(g => ({
+        id: g.id as string,
+        name: g.name as string,
+        isIncome: Boolean(g.is_income),
+        hidden: Boolean(g.hidden),
+        // A category's own is_income is false for one created in the income group, so the group decides.
+        categories: (g.categories ?? []).map(c => ({
+          id: c.id as string,
+          name: c.name as string,
+          label: `${g.name} / ${c.name}`,
+          isIncome: Boolean(g.is_income),
+          hidden: Boolean(g.hidden) || Boolean(c.hidden),
+          budgeted: (c.budgeted as number | undefined) ?? 0,
+          // Income categories carry `received` (positive) instead of `spent`.
+          spent: ((g.is_income ? c.received : c.spent) as number | undefined) ?? 0,
+          balance: (c.balance as number | undefined) ?? 0,
+          carryover: Boolean(c.carryover),
+        })),
+      })),
+    };
+  }
+
+  /**
+   * Sets each item's budgeted amount for `month` in one batch, then reads the month back until every
+   * item shows its amount. Actual's `setBudgetAmount` answers success for a month with no budget and
+   * for an unknown category id (both measured on 26.10.0), so the caller validates first and this
+   * read-back is what proves the write. On any failure every item is put back to `restore` before
+   * the error is thrown; the error says whether that restore itself held.
+   */
+  async setBudgets(month: string, items: { category: string; amount: number }[],
+                   restore: { category: string; amount: number }[]): Promise<void> {
+    await this.locked(async () => {
+      const write = async (xs: { category: string; amount: number }[]) => {
+        await api.batchBudgetUpdates(async () => {
+          for (const x of xs) await api.setBudgetAmount(month, x.category, x.amount);
+        });
+        await this.waitFor(month, xs);
+      };
+      try {
+        await write(items);
+      } catch (e) {
+        let restored = 'restored the previous amounts';
+        try { await write(restore); } catch (r) { restored = `COULD NOT restore the previous amounts (${(r as Error).message})`; }
+        throw new BudgetWriteError(`budget write for ${month} failed (${(e as Error).message}); ${restored}`);
+      }
+    });
+  }
+
+  async setCarryover(month: string, category: string, flag: boolean): Promise<void> {
+    await this.locked(async () => {
+      await api.setBudgetCarryover(month, category, flag);
+      for (let waited = 0; ; waited += 25) {
+        const c = (await this.budgetMonth(month)).groups.flatMap(g => g.categories).find(x => x.id === category);
+        if (c?.carryover === flag) return;
+        if (waited >= 2000) throw new Error(`Actual did not apply the carryover change to ${category} in ${month}`);
+        await new Promise(r => setTimeout(r, 25));
+      }
+    });
+  }
+
+  /**
+   * Holds `amount` of this month's to-budget for next month, replacing any earlier hold; 0 releases
+   * the hold. `holdBudgetForNextMonth` answers true even for an amount far above to-budget (measured),
+   * so the caller bounds it and the month is read back until `forNextMonth` shows it.
+   */
+  async holdForNextMonth(month: string, amount: number): Promise<void> {
+    await this.locked(async () => {
+      await api.resetBudgetHold(month);
+      if (amount > 0 && !(await api.holdBudgetForNextMonth(month, amount))) {
+        throw new Error(`Actual refused to hold ${amount} in ${month}`);
+      }
+      for (let waited = 0; ; waited += 25) {
+        if ((await this.budgetMonth(month)).forNextMonth === amount) return;
+        if (waited >= 2000) throw new Error(`Actual did not apply the hold for ${month}`);
+        await new Promise(r => setTimeout(r, 25));
+      }
+    });
+  }
+
+  private async waitFor(month: string, xs: { category: string; amount: number }[]): Promise<void> {
+    for (let waited = 0; ; waited += 25) {
+      const cats = new Map((await this.budgetMonth(month)).groups.flatMap(g => g.categories).map(c => [c.id, c]));
+      const off = xs.filter(x => cats.get(x.category)?.budgeted !== x.amount);
+      if (!off.length) return;
+      if (waited >= 2000) throw new Error(`Actual did not apply the amount for ${off.map(x => x.category).join(', ')}`);
+      await new Promise(r => setTimeout(r, 25));
+    }
   }
 
   /** `exclude` holds category ids left out of every report (one-off money such as a house purchase). */
