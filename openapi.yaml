@@ -17,10 +17,42 @@ components:
   parameters:
     from: { name: from, in: query, schema: { type: string, format: date }, description: "YYYY-MM-DD; default first of this month" }
     to: { name: to, in: query, schema: { type: string, format: date }, description: "YYYY-MM-DD; default today" }
+    month: { name: month, in: path, required: true, schema: { type: string, pattern: "^\\d{4}-(0[1-9]|1[0-2])$" }, description: YYYY-MM }
   schemas:
     Money:
       type: object
       properties: { amount: { type: integer }, formatted: { type: string, example: "-25.50" } }
+    BudgetMonth:
+      type: object
+      properties:
+        month: { type: string }
+        toBudget: { $ref: "#/components/schemas/Money" }
+        totalBudgeted: { $ref: "#/components/schemas/Money" }
+        totalSpent: { $ref: "#/components/schemas/Money" }
+        totalBalance: { $ref: "#/components/schemas/Money" }
+        totalIncome: { $ref: "#/components/schemas/Money" }
+        forNextMonth: { $ref: "#/components/schemas/Money" }
+        groups:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              isIncome: { type: boolean }
+              categories:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    label: { type: string, example: "Needs / Coffee" }
+                    isIncome: { type: boolean }
+                    budgeted: { $ref: "#/components/schemas/Money" }
+                    spent: { $ref: "#/components/schemas/Money" }
+                    balance: { $ref: "#/components/schemas/Money" }
+                    carryover: { type: boolean }
+                    overspent: { type: boolean, description: balance below zero }
     Error:
       type: object
       properties: { error: { type: object, properties: { code: { type: string }, message: { type: string } } } }
@@ -212,6 +244,89 @@ paths:
       responses:
         "200": { description: OK }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/budget/{month}:
+    get:
+      summary: One budget month (envelope budgeting), synced first; hidden groups and categories left out
+      description: >-
+        A failed sync is an error, never a stale month. `totalBudgeted` is positive (the sum budgeted);
+        `spent` is negative for money out, and an income category's `spent` is what it received.
+      parameters: [{ $ref: "#/components/parameters/month" }]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/BudgetMonth" } } } }
+        "400": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Set budgeted amounts for up to 50 categories in one month
+      description: >-
+        Every item is checked before anything is written: an unknown, hidden or income category, an
+        `expectLabel` that is not the category's current "Group / Name" label (case, emoji and
+        punctuation ignored), a repeated category, or a month more than 12 ahead refuses the whole
+        request with 400 and nothing written. The answer is the month read back after the write. If
+        the write fails, every item is put back to its previous amount and the 500 says whether that
+        held. `synced` is false when the push to the Actual server failed; the next run pushes it.
+      parameters: [{ $ref: "#/components/parameters/month" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [items]
+              properties:
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [category, expectLabel, amount]
+                    properties:
+                      category: { type: string }
+                      expectLabel: { type: string }
+                      amount: { type: integer, minimum: 0, description: Minor units }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  month: { type: string }
+                  items: { type: array, items: { type: object, properties: { category: { type: string }, label: { type: string }, before: { $ref: "#/components/schemas/Money" }, after: { $ref: "#/components/schemas/Money" } } } }
+                  toBudget: { $ref: "#/components/schemas/Money" }
+                  synced: { type: boolean }
+        "400": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /v1/budget/{month}/carryover:
+    post:
+      summary: Turn a category's rollover of overspending on or off for a month; same checks as a budget write
+      parameters: [{ $ref: "#/components/parameters/month" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, expectLabel, carryover]
+              properties:
+                category: { type: string }
+                expectLabel: { type: string }
+                carryover: { type: boolean }
+      responses:
+        "200": { description: "OK: `{month, category, label, before, after, synced}`, before and after read from Actual" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/budget/{month}/hold:
+    post:
+      summary: Hold part of this month's to-budget for next month, replacing any earlier hold; 0 releases it
+      description: >-
+        Refused with 400 when the amount is more than to-budget plus what is already held (Actual's own
+        call answers success for such an amount and holds something else).
+      parameters: [{ $ref: "#/components/parameters/month" }]
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, required: [amount], properties: { amount: { type: integer, minimum: 0, description: Minor units } } }
+      responses:
+        "200": { description: "OK: `{month, before, after, toBudget, synced}`, each amount Money read from Actual" }
+        "400": { $ref: "#/components/responses/Error" }
   /v1/curate/run:
     post:
       summary: Run the curator now (waits for an in-flight run instead of starting a second)

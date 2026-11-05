@@ -31,3 +31,30 @@ export type RuleOrigin = 'human' | 'promoted' | 'bootstrap';
 export type NewCuratorRule = { importedPayee: string; notesContains?: string; categoryId: string };
 
 export type ReportRow = { key: string | null; label: string; amount: number };
+
+/** One category in one budget month. Amounts are signed minor units: `spent` is negative for money out. */
+export type BudgetCategory = {
+  id: string;
+  name: string;
+  label: string;
+  isIncome: boolean;
+  /** The category or its group is hidden. */
+  hidden: boolean;
+  budgeted: number;
+  spent: number;
+  balance: number;
+  carryover: boolean;
+};
+
+export type BudgetMonth = {
+  month: string;
+  toBudget: number;
+  /** Positive: the sum of what was budgeted. */
+  totalBudgeted: number;
+  totalSpent: number;
+  totalBalance: number;
+  totalIncome: number;
+  /** What is held for next month. */
+  forNextMonth: number;
+  groups: { id: string; name: string; isIncome: boolean; hidden: boolean; categories: BudgetCategory[] }[];
+};
