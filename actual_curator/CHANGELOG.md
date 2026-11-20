@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0
+
+- New monthly budget: the app can now work out how to fund each category for the month, apply it in
+  Actual after you approve, move money between categories, and tell you what is off pace. All the
+  numbers come from code, not from the model. There are no new options.
+
 ## 0.1.6
 
 - New **/money** page: this month's spending in plain words, in Hebrew or English, for your phone.

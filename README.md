@@ -78,6 +78,15 @@ watch the dry-run log before trusting the threshold. The default threshold (0.95
 on 300 real, already-categorized rows; see
 [`docs/notes/jev-spike.md`](docs/notes/jev-spike.md).
 
+## Monthly budget
+
+Besides categorizing, the curator runs a monthly envelope budget in Actual. You save a plan
+(fixed bills, variable categories, set-asides, income sources); then `/v1/budget` can propose how to
+fund the month, apply it after approval, move money between categories, and report pace and alerts
+(income landed, a transfer that did not arrive, a category going off track, rows to review). Every
+number is computed in code, so an assistant only quotes and applies it. Requests take shekels;
+responses give agorot with a formatted string. See [`openapi.yaml`](openapi.yaml) for the routes.
+
 ## Configuration
 
 Everything is environment variables (listed in [`.env.example`](.env.example)) plus one YAML
