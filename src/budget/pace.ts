@@ -3,7 +3,7 @@ import { checkPlan, plannedAmount } from './propose.ts';
 import type { Kind, MonthSnapshot, Plan } from './types.ts';
 
 export type PaceStatus = 'ok' | 'watch' | 'off';
-/** Amounts in minor units; `spent` is positive. */
+/** Amounts in minor units; `spent` is positive. `projected` is only a projection for variable kinds; for fixed and setaside it is just `spent`. */
 export type PaceLine = {
   categoryId: string; label: string; kind: Kind; budgeted: number; spent: number;
   balance: number; expectedByToday: number; projected: number; status: PaceStatus;
@@ -55,15 +55,13 @@ export function pace(plan: Plan, snap: MonthSnapshot, today: string): PaceLine[]
 
 const TEN_SHEKEL = 1000;
 
-export function suggestMoves(plan: Plan, lines: PaceLine[], today: string): Move[] {
-  const month = today.slice(0, 7);
-  const D = daysInMonth(month);
-  const d = Number(today.slice(8, 10));
+/** `today` is unused: slack comes from each line's expectedByToday, which pace() computed for the snapshot's own month. Kept for the declared interface. */
+export function suggestMoves(plan: Plan, lines: PaceLine[], _today: string): Move[] {
   const protectedIds = new Set(plan.categories.filter((c) => c.protected).map((c) => c.categoryId));
   const slack = new Map<string, number>();
   for (const l of lines) {
     if (l.kind !== 'variable' || l.status !== 'ok' || protectedIds.has(l.categoryId)) continue;
-    const s = l.balance - Math.round((l.budgeted * (D - d)) / D);
+    const s = l.balance - (l.budgeted - l.expectedByToday);
     if (s > 0) slack.set(l.categoryId, s);
   }
   const label = new Map(lines.map((l) => [l.categoryId, l.label]));

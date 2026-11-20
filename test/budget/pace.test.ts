@@ -39,6 +39,11 @@ describe('pace', () => {
     expect(status(2800, 600, '2026-11-02').status).toBe('watch');
   });
 
+  it('projection starts at day 7: d=6 is watch at most, d=7 is off', () => {
+    expect(status(2800, 1000, '2026-11-06').status).toBe('watch');
+    expect(status(2800, 1000, '2026-11-07').status).toBe('off');
+  });
+
   it('negative balance is off for every kind', () => {
     const p = plan([
       { categoryId: 'v', kind: 'variable', priority: 1, amount: 100 },
@@ -148,5 +153,28 @@ describe('suggestMoves', () => {
     const s2 = snap([c('a', 1000, 700), c('b', 1000, 700), c('src', 1000, 200)]);
     const m2 = suggestMoves(p2, pace(p2, s2, today), today);
     expect(m2.map((m) => [m.to, m.amount])).toEqual([['a', NIS(200)], ['b', NIS(100)]]);
+  });
+
+  it('slack is computed for the snapshot month, not today\'s month', () => {
+    const p3 = plan([
+      { categoryId: 'a', kind: 'variable', priority: 1, amount: 1000 },
+      { categoryId: 'src', kind: 'variable', priority: 2, amount: 1000 },
+    ]);
+    // future month: nothing spent, balance == budgeted -> slack 0
+    const flat = snap([c('a', 1000, 1200), c('src', 1000, 0)], '2026-12');
+    expect(suggestMoves(p3, pace(p3, flat, '2026-11-15'), '2026-11-15')).toEqual([
+    ]);
+    // carry-in: balance 1400 vs budgeted 1000 -> slack 400
+    const carry = snap([c('a', 1000, 1200), cat('src', { budgeted: NIS(1000), balance: NIS(1400) })], '2026-12');
+    const m = suggestMoves(p3, pace(p3, carry, '2026-11-15'), '2026-11-15');
+    expect(m).toEqual([{ from: 'src', fromLabel: 'src', to: 'a', toLabel: 'a', amount: NIS(400) }]);
+  });
+
+  it('a watch source is never a move source', () => {
+    const lines = [
+      { categoryId: 'a', label: 'a', kind: 'variable', budgeted: 100000, spent: 150000, balance: -50000, expectedByToday: 50000, projected: 200000, status: 'off' },
+      { categoryId: 'w', label: 'w', kind: 'variable', budgeted: 100000, spent: 0, balance: 100000, expectedByToday: 50000, projected: 50000, status: 'watch' },
+    ] as const;
+    expect(suggestMoves(p, [...lines], today)).toEqual([]);
   });
 });

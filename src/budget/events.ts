@@ -63,5 +63,5 @@ export function buildEvents(i: {
     });
   }
   if (i.reviewCount > 0) events.push({ id: `review:${i.today}`, kind: 'review', count: i.reviewCount });
-  return events.filter((e) => !(e.id in i.acked));
+  return events.filter((e) => !Object.hasOwn(i.acked, e.id));
 }
