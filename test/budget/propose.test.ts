@@ -45,6 +45,11 @@ describe('propose', () => {
     expect(plannedAmount(c, cat('car', { balance: 900000 }), '2026-12')).toBe(0);
   });
 
+  it('setaside fractional-shekel target has no float noise', () => {
+    const c = plan([{ categoryId: 'x', kind: 'setaside', priority: 1, target: 1.1, due: '2026-12' }]).categories[0]!;
+    expect(plannedAmount(c, cat('x'), '2026-12')).toBe(110);
+  });
+
   it('excluded category has no line', () => {
     const p = plan([
       { categoryId: 'biz', kind: 'excluded', priority: 1 },

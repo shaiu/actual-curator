@@ -40,16 +40,18 @@ export function plannedAmount(c: PlanCategory, cat: CategoryMonth, month: string
     case 'setaside': {
       const months = Math.max(1, monthsBetween(month, c.due ?? month));
       const carryIn = cat.balance - cat.budgeted - cat.spent;
-      return Math.max(0, Math.ceil(((c.target ?? 0) * 100 - carryIn) / months));
+      return Math.max(0, Math.ceil((Math.round((c.target ?? 0) * 100) - carryIn) / months));
     }
     case 'excluded':
       return 0;
   }
 }
 
+const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
 /** sha256 of month + toBudget + every category's budgeted, sorted by id; first 12 hex chars. */
 export function proposalId(snap: MonthSnapshot): string {
-  const cats = [...snap.categories].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+  const cats = [...snap.categories].sort((a, b) => cmp(a.id, b.id))
     .map((c) => `${c.id}:${c.budgeted}`);
   return createHash('sha256').update([snap.month, snap.toBudget, ...cats].join('|')).digest('hex').slice(0, 12);
 }
@@ -60,7 +62,7 @@ export function propose(plan: Plan, snap: MonthSnapshot): Proposal {
   const entries = plan.categories
     .filter((c) => c.kind !== 'excluded')
     .map((c) => ({ c, cat: byId.get(c.categoryId)! }))
-    .sort((x, y) => x.c.priority - y.c.priority || (x.cat.label < y.cat.label ? -1 : x.cat.label > y.cat.label ? 1 : 0));
+    .sort((x, y) => x.c.priority - y.c.priority || cmp(x.cat.label, y.cat.label));
 
   let remaining = snap.toBudget;
   const lines: ProposalLine[] = entries.map(({ c, cat }) => {
