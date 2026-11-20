@@ -99,7 +99,10 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const p = propose(plan, snap);
     const { landed, expected } = incomeStatus(plan, month, await monthRows(month));
     // Actual throws "No budget exists for month" before its earliest month; that just means nothing was spent.
-    const prev = await store.budgetMonth(previousMonth(month)).catch(() => null);
+    const prev = await store.budgetMonth(previousMonth(month)).catch((e: unknown) => {
+      if (e instanceof Error && e.message.includes('No budget exists for month')) return null;
+      throw e;
+    });
     const excluded = new Set(plan.categories.filter(x => x.kind === 'excluded').map(x => x.categoryId));
     const excludedSpent = (prev?.categories ?? []).filter(x => excluded.has(x.id)).reduce((s, x) => s - x.spent, 0);
     return c.json({
@@ -140,7 +143,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     return c.json({ month: b.month,
       applied: added.map(a => ({ categoryId: a.cat.id, label: a.cat.label, added: money(a.added), budgeted: money(a.cat.budgeted + a.added) })),
       toBudget: money(snap.toBudget - total) });
-}));
+  }));
 
   app.post(`${g}/move`, c => exclusive(async () => {
     const b = await body(c, moveBody);
@@ -172,7 +175,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const out = (cat: typeof from, delta: number) => ({ id: cat.id, label: cat.label,
       budgeted: money(cat.budgeted + delta), balance: money(cat.balance + delta) });
     return c.json({ month: b.month, from: out(from, -amount), to: out(to, amount) });
-}));
+  }));
 
   app.get(`${g}/status`, async c => {
     const month = monthParam(c);

@@ -65,12 +65,12 @@ class FakeStore implements ApiStore {
   async spend() { return []; }
   async income() { return []; }
   async budgetMonth(month: string) {
-    if (this.failPrev && month === '2026-10') throw new Error('No budget exists for month: 2026-10');
+    if (this.failPrev && month === '2026-10') throw new Error(this.failPrev);
     if (!this.snaps.has(month)) this.snaps.set(month, snapshot(month));
     return structuredClone(this.snaps.get(month)!);
   }
   failWrite = false;
-  failPrev = false;
+  failPrev: string | false = false;
   async setBudgeted(month: string, amounts: Record<string, number>) {
     await Promise.resolve();
     if (this.failWrite) throw new Error('boom');
@@ -358,7 +358,7 @@ test('apply and move: when setBudgeted throws nothing is journaled', async () =>
 
 test('propose: excludedSpentLastMonth is 0 when Actual has no budget for the previous month', async () => {
   savePlan();
-  store.failPrev = true;
+  store.failPrev = 'No budget exists for month: 2026-10';
   const r = await get('/propose?month=2026-11');
   expect(r.status).toBe(200);
   expect(((await r.json()) as any).excludedSpentLastMonth).toEqual({ amount: 0, formatted: '0.00' });
@@ -374,4 +374,10 @@ test('apply: empty amounts -> 400 bad_request', async () => {
 test('apply: a protected category can be funded', async () => {
   savePlan();
   expect((await post('/apply', { month: '2026-11', proposalId: await proposalId(), amounts: { prot: 5 }, approvedBy: 's' })).status).toBe(200);
+});
+
+test('propose: a real failure reading the previous month is not hidden as zero', async () => {
+  savePlan();
+  store.failPrev = 'connection lost';
+  expect((await get('/propose?month=2026-11')).status).toBe(500);
 });
