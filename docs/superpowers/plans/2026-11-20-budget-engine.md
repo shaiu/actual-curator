@@ -247,7 +247,7 @@ Tests mirror the source: `test/budget/*.test.ts`, `test/actual/store.test.ts` (e
     - Otherwise **watch** when `spent > expected × (1+watchPct/100)` and `spent − expected ≥ watchMin×100`.
     - Otherwise **ok**.
   - **fixed**: **off** iff `balance < 0`, otherwise ok.
-  - **setaside**: **off** iff `balance < 0`. **watch** when `d ≥ 20` and `budgeted < planned` (the planned value from Task 3).
+  - **setaside**: **off** iff `balance < 0`. **watch** when `d ≥ 20` and `budgeted < plannedAmount(c, cat, month)` (Task 3).
   - A category with `budgeted = 0` and `spent = 0` is ok.
 
   `suggestMoves`, for each `off` line:
@@ -367,6 +367,7 @@ Status:
 - [ ] **Step 2:** Run `npm run check`. Expected: PASS.
 - [ ] **Step 3:** Open the PR, wait for CI, and merge. Release `0.2.0` exactly as `docs/releasing.md` says: release branch, tag, wait for the image, then bump `main`.
 - [ ] **Step 4: Hand off the HA update to Shai.** Give him click-by-click steps: HA → Settings → Apps → Actual Curator → Update, then check the Log shows `0.2.0`. Do not try the Supervisor restart from the session.
+- **Not in this plan:** writing the plan `note` into Actual category notes (optional in the spec); the curator rule filing One Zero → Ready to Assign (created through the existing `POST /v1/rules` during Plan 2 rollout); the Sep/Oct rollover sanity check (first advisor session).
 - [ ] **Step 5: Run a live read-only smoke test** through `http://192.168.68.125:8507` with `CURATOR_TOKEN` sent from a mode-600 header file:
   - `GET /v1/health` shows version `0.2.0`.
   - `GET /v1/budget/plan` returns `{"plan":null}`.
