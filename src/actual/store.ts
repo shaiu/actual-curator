@@ -1,4 +1,5 @@
 import * as api from '@actual-app/api';
+import type { MonthSnapshot } from '../budget/types.ts';
 import type { CategoryOption } from '../classifier/types.ts';
 import { parseTags } from '../notes.ts';
 import type { CuratorRow, CuratorRule, NewCuratorRule, ReportRow, RuleAction, RuleCondition } from './types.ts';
@@ -98,6 +99,42 @@ export class ActualStore {
       }
     }
     return out;
+  }
+
+  /** One month's envelope snapshot, every amount in minor units. Hidden and income categories are included, flagged. */
+  async budgetMonth(month: string): Promise<MonthSnapshot> {
+    const m = await api.getBudgetMonth(month);
+    const categories: MonthSnapshot['categories'] = [];
+    for (const g of m.categoryGroups as (Raw & { categories?: Raw[] })[]) {
+      for (const c of g.categories ?? []) {
+        categories.push({
+          id: c.id as string, label: `${g.name} / ${c.name}`,
+          hidden: Boolean(c.hidden || g.hidden), isIncome: Boolean(g.is_income),
+          budgeted: (c.budgeted as number) ?? 0, spent: (c.spent as number) ?? 0, balance: (c.balance as number) ?? 0,
+        });
+      }
+    }
+    return { month, toBudget: m.toBudget, categories };
+  }
+
+  /**
+   * Sets ABSOLUTE budgeted amounts (minor units) for a month in one batch.
+   * Like `update`, the writes are read back, since the api can resolve before they are applied.
+   */
+  async setBudgeted(month: string, amounts: Record<string, number>): Promise<void> {
+    await this.locked(async () => {
+      await api.batchBudgetUpdates(async () => {
+        for (const [id, amount] of Object.entries(amounts)) await api.setBudgetAmount(month, id, amount);
+      });
+      const applied = async () => {
+        const snap = await this.budgetMonth(month);
+        return Object.entries(amounts).every(([id, a]) => snap.categories.find(c => c.id === id)?.budgeted === a);
+      };
+      for (let waited = 0; !(await applied()); waited += 25) {
+        if (waited >= 2000) throw new Error(`Actual did not apply the budgeted amounts for ${month}`);
+        await new Promise(r => setTimeout(r, 25));
+      }
+    });
   }
 
   async accounts(): Promise<{ id: string; name: string; offbudget: boolean }[]> {
