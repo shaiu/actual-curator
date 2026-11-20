@@ -77,13 +77,17 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     return { plan, snap };
   };
   /** Deposit candidates from on-budget accounts only: income "landed" means money in the budget. */
-  const incomeRows = async (from: string, to: string): Promise<IncomeRow[]> => {
+  const incomeRows = async (ranges: [from: string, to: string][]): Promise<IncomeRow[]> => {
     const off = new Set((await store.accounts()).filter(a => a.offbudget).map(a => a.id));
-    return (await store.transactions({ from, to, limit: 5000 })).filter(r => !off.has(r.account))
+    const from = ranges.map(x => x[0]).sort()[0]!;
+    const to = ranges.map(x => x[1]).sort().at(-1)!;
+    const inRanges = (date: string) => ranges.some(([f, t]) => date >= f && date <= t);
+    return (await store.transactions({ from, to, limit: 5000 })).filter(r => !off.has(r.account) && inRanges(r.date))
       .map(r => ({ id: r.id, date: r.date, amount: r.amount, account: r.account, payee: r.payee,
         importedPayee: r.importedPayee, transferId: r.transferId }));
   };
-  const monthRows = (month: string) => incomeRows(`${month}-01`, `${month}-${daysInMonth(month)}`);
+  const monthRange = (month: string): [string, string] => [`${month}-01`, `${month}-${daysInMonth(month)}`];
+  const monthRows = (month: string) => incomeRows([monthRange(month)]);
   /**
    * toBudget of every later month Actual has data for (up to a year ahead), in month order. A later month's To budget
    * includes this month's leftover, so what is free to give this month is the minimum across all of them.
@@ -226,11 +230,14 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const moves = month < currentMonth(now()) ? [] : suggestMoves(plan, lines, today);
     // Income events look 35 days back from today, plus the queried month, plus (for the current month) the previous
     // one for the transfer check. Row ids are the event ids, so overlapping windows never duplicate an event.
-    const rowSets = [await incomeRows(dayBefore(today, INCOME_WINDOW_DAYS), today), await monthRows(month)];
-    if (month === currentMonth(now())) rowSets.push(await monthRows(previousMonth(month)));
-    const income = [...new Map(rowSets.flat().map(r => [r.id, r])).values()];
+    const ranges: [string, string][] = [[dayBefore(today, INCOME_WINDOW_DAYS), today], monthRange(month)];
+    if (month === currentMonth(now())) ranges.push(monthRange(previousMonth(month)));
+    const income = await incomeRows(ranges);
     const reviewIds = (await store.transactions({ from: day30Before(today), to: today, tag: 'review', limit: 10_000 })).map(r => r.id);
-    const events = buildEvents({ plan, month, today, income, lines, reviewIds, acked: budget.state().acked });
+    const firstSaved = budget.firstSavedAt();
+    const planSince = firstSaved ? jerusalemToday(firstSaved) : undefined;
+    const events = buildEvents({ plan, month, today, income, lines, reviewIds, acked: budget.state().acked,
+      ...(planSince ? { planSince } : {}) });
     const sum = (f: (l: PaceLine) => number) => lines.reduce((s, l) => s + f(l), 0);
     return c.json({ month, today,
       totals: { budgeted: money(sum(l => l.budgeted)), spent: money(sum(l => l.spent)), balance: money(sum(l => l.balance)) },

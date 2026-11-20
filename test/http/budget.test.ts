@@ -63,7 +63,8 @@ class FakeStore implements ApiStore {
     this.onSync?.();
   }
   async budgetMonths() { return [...this.months]; }
-  async accounts() { return [{ id: 'a', name: 'Bank', offbudget: false }, { id: 'off', name: 'Savings', offbudget: true }]; }
+  accountCalls = 0;
+  async accounts() { this.accountCalls++; return [{ id: 'a', name: 'Bank', offbudget: false }, { id: 'off', name: 'Savings', offbudget: true }]; }
   async categories() { return [] as CategoryOption[]; }
   async transactions(q: { from: string; to: string; tag?: string; limit: number }) {
     this.txQueries.push(q);
@@ -121,7 +122,8 @@ const get = (path: string) => app.request(`/v1/budget${path}`, { headers: auth }
 const post = (path: string, body: unknown) => app.request(`/v1/budget${path}`, send('POST', body));
 const put = (path: string, body: unknown) => app.request(`/v1/budget${path}`, send('PUT', body));
 const errCode = async (r: Response) => ((await r.json()) as { error: { code: string } }).error.code;
-const savePlan = () => files.savePlan(plan as never, { by: 't', why: 't' }, new Date());
+const PLAN_SAVED = new Date('2026-11-01T00:00:00Z');
+const savePlan = () => files.savePlan(plan as never, { by: 't', why: 't' }, PLAN_SAVED);
 
 beforeEach(() => {
   clock = new Date('2026-11-20T09:00:00Z');
@@ -409,7 +411,7 @@ test('propose: a real failure reading the previous month is not hidden as zero',
   expect((await get('/propose?month=2026-11')).status).toBe(500);
 });
 
-const savePlanOf = (p: PlanInput) => files.savePlan(p as never, { by: 't', why: 't' }, new Date());
+const savePlanOf = (p: PlanInput) => files.savePlan(p as never, { by: 't', why: 't' }, PLAN_SAVED);
 const statusOf = async (path = '/status') => (await (await get(path)).json()) as any;
 
 test('C1: apply December, then November is limited to what December left', async () => {
@@ -540,4 +542,18 @@ test('M3: a visible category that is not in the plan cannot be a move source', a
   expect(err.message).toContain('not in the plan');
   // any visible expense category is still a valid destination
   expect((await post('/move', { month: '2026-11', from: 'fun', to: 'misc', amount: 1, approvedBy: 's' })).status).toBe(200);
+});
+
+test('status: a transfer due before the plan was first saved is never reported missing', async () => {
+  files.savePlan({ ...plan, incomeSources: [{ name: 'Alimony', payee: 'Inbal', expectedAmount: 5000, expectedDay: 29, fixedTransfer: true }] } as never,
+    { by: 't', why: 't' }, new Date('2026-12-04T08:00:00Z'));
+  clock = new Date('2026-12-05T09:00:00Z');
+  expect((await statusOf()).events.map((e: any) => e.id)).not.toContain('transfer:2026-11');
+});
+
+test('status: reads transactions and accounts once each for income', async () => {
+  savePlan();
+  await get('/status');
+  expect(store.txQueries.filter(q => q.tag === undefined)).toHaveLength(1);
+  expect(store.accountCalls).toBe(1);
 });

@@ -51,6 +51,8 @@ function transferDue(month: string, expectedDay: number): string {
 export function buildEvents(i: {
   plan: Plan; month: string; today: string; income: IncomeRow[];
   lines: PaceLine[]; reviewIds: string[]; acked: Record<string, string>;
+  /** Jerusalem YYYY-MM-DD the plan was first saved: no transfer due before it is reported missing. */
+  planSince?: string;
 }): BudgetEvent[] {
   const events: BudgetEvent[] = [];
   for (const row of i.income) {
@@ -62,25 +64,24 @@ export function buildEvents(i: {
     });
   }
 
-  const { expected } = incomeStatus(i.plan, i.month, i.income);
+  // One verdict per (source, month): due date passed, not before the plan existed, and nothing landed by then.
+  const missing = (s: IncomeSource, month: string): boolean => {
+    const due = transferDue(month, s.expectedDay);
+    if (i.today <= due || (i.planSince !== undefined && due < i.planSince)) return false;
+    return !i.income.some((r) => matchIncome(s, r) && r.date >= `${month}-01` && (r.date.startsWith(month) || r.date <= due));
+  };
   const todayMonth = i.today.slice(0, 7);
-  const todayDay = Number(i.today.slice(8, 10));
-  const monthOver = todayMonth > i.month;
-  for (const s of expected) {
-    if (!s.fixedTransfer) continue;
-    const late = monthOver || (todayMonth === i.month && todayDay > Math.min(s.expectedDay + 3, daysInMonth(i.month)));
-    if (late) events.push({ id: `transfer:${i.month}`, kind: 'transfer_missing', source: s.name, expectedDay: s.expectedDay });
+  for (const s of i.plan.incomeSources) {
+    if (s.fixedTransfer && missing(s, i.month)) {
+      events.push({ id: `transfer:${i.month}`, kind: 'transfer_missing', source: s.name, expectedDay: s.expectedDay });
+    }
   }
-
-  // The in-month rule never fires when expectedDay+3 passes month end; the next month looks back instead.
+  // Only a due date that spills past month end is invisible to the month's own check; the next month looks back.
   if (todayMonth === i.month) {
     const prev = previousMonth(i.month);
     for (const s of i.plan.incomeSources) {
-      if (!s.fixedTransfer) continue;
-      const due = transferDue(prev, s.expectedDay);
-      if (i.today <= due) continue;
-      const landed = i.income.some((r) => matchIncome(s, r) && r.date >= `${prev}-01` && (r.date.startsWith(prev) || r.date <= due));
-      if (!landed) events.push({ id: `transfer:${prev}`, kind: 'transfer_missing', source: s.name, expectedDay: s.expectedDay });
+      if (!s.fixedTransfer || s.expectedDay + 3 <= daysInMonth(prev)) continue;
+      if (missing(s, prev)) events.push({ id: `transfer:${prev}`, kind: 'transfer_missing', source: s.name, expectedDay: s.expectedDay });
     }
   }
 

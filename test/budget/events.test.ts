@@ -48,13 +48,13 @@ describe('events', () => {
 
   it('transfer_missing only after expectedDay+3', () => {
     const at = (today: string, month = '2026-11') => buildEvents({ ...base, month, today })
-      .filter((e) => e.kind === 'transfer_missing' && e.id === `transfer:${month}`);
+      .filter((e) => e.kind === 'transfer_missing');
     expect(at('2026-11-08')).toEqual([]);
     expect(at('2026-11-09')).toEqual([{ id: 'transfer:2026-11', kind: 'transfer_missing', source: 'Transfer', expectedDay: 5 }]);
     expect(at('2026-11-01', '2026-12')).toEqual([]);
     expect(at('2026-12-01')).toHaveLength(1);
     const landed = buildEvents({ ...base, today: '2026-11-20', income: [row('9', { payee: 'Inbal' })] });
-    expect(landed.filter((e) => e.id === 'transfer:2026-11')).toEqual([]);
+    expect(landed.filter((e) => e.kind === 'transfer_missing')).toEqual([]);
   });
 
   it('watch to off emits a new pace event', () => {
@@ -93,6 +93,36 @@ describe('events', () => {
     expect(at('2026-12-03')).toEqual([{ id: 'transfer:2026-11', kind: 'transfer_missing', source: 'Late', expectedDay: 29 }]);
     expect(at('2026-12-03', [row('l', { date: '2026-11-29', payee: 'Inbal' })])).toEqual([]);
     expect(at('2026-12-03', [row('l', { date: '2026-12-01', payee: 'Inbal' })])).toEqual([]); // landed inside the grace window
+  });
+
+  it('look-back only for transfers whose due date spills into the new month, never before the plan existed', () => {
+    const p = planSchema.parse({ version: 1, categories: [], incomeSources: [
+      { name: 'Late', payee: 'Inbal', expectedAmount: 1, expectedDay: 29, fixedTransfer: true }] });
+    const at = (today: string, planSince?: string, income: IncomeRow[] = []) =>
+      buildEvents({ ...base, plan: p, month: today.slice(0, 7), today, income, ...(planSince ? { planSince } : {}) })
+        .filter((e) => e.kind === 'transfer_missing').map((e) => e.id);
+    expect(at('2026-12-03', '2026-11-01')).toEqual(['transfer:2026-11']);
+    expect(at('2026-12-03', '2026-12-03')).toEqual([]); // plan saved after the November due date (Dec 2)
+    expect(at('2026-12-03', '2026-12-02')).toEqual(['transfer:2026-11']);
+    // a day-5 transfer does not spill: day 1 of the next month raises nothing for the month before
+    const early = planSchema.parse({ version: 1, categories: [], incomeSources: [
+      { name: 'Early', payee: 'Inbal', expectedAmount: 1, expectedDay: 5, fixedTransfer: true }] });
+    expect(buildEvents({ ...base, plan: early, month: '2026-12', today: '2026-12-01' })
+      .filter((e) => e.kind === 'transfer_missing')).toEqual([]);
+    // in-month rule also respects planSince
+    expect(buildEvents({ ...base, today: '2026-11-20', planSince: '2026-11-10' }).filter((e) => e.kind === 'transfer_missing')).toEqual([]);
+  });
+
+  it('transfer:<month> gets the same verdict from the month itself and from a later view (grace window)', () => {
+    const p = planSchema.parse({ version: 1, categories: [], incomeSources: [
+      { name: 'Late', payee: 'Inbal', expectedAmount: 1, expectedDay: 29, fixedTransfer: true }] });
+    const landedInGrace = [row('g', { date: '2026-12-01', payee: 'Inbal' })];
+    const view = (month: string, today: string, income: IncomeRow[]) =>
+      buildEvents({ ...base, plan: p, month, today, income }).filter((e) => e.id === 'transfer:2026-11').length;
+    expect(view('2026-12', '2026-12-10', landedInGrace)).toBe(0);
+    expect(view('2026-11', '2026-12-10', landedInGrace)).toBe(0); // monthOver used to say missing
+    expect(view('2026-12', '2026-12-10', [])).toBe(1);
+    expect(view('2026-11', '2026-12-10', [])).toBe(1);
   });
 
   it('income matching honours the source account', () => {

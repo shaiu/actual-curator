@@ -59,3 +59,11 @@ test('no *.tmp file is left behind', () => {
   f.ack(['a'], new Date());
   expect(readdirSync(join(dir, 'budget')).filter((n) => n.endsWith('.tmp'))).toEqual([]);
 });
+
+test('firstSavedAt: null before any save, then the first history line', () => {
+  const f = new BudgetFiles(dir);
+  expect(f.firstSavedAt()).toBeNull();
+  f.savePlan(plan, { by: 'a', why: 'one' }, new Date('2026-11-20T10:00:00Z'));
+  f.savePlan(plan, { by: 'a', why: 'two' }, new Date('2026-11-25T10:00:00Z'));
+  expect(f.firstSavedAt()?.toISOString()).toBe('2026-11-20T10:00:00.000Z');
+});
