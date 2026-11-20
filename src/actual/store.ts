@@ -95,7 +95,7 @@ export class ActualStore {
       if (g.hidden && !opts.includeHidden) continue;
       for (const c of g.categories ?? []) {
         if (c.hidden && !opts.includeHidden) continue;
-        out.push({ id: c.id as string, label: `${g.name} / ${c.name}`, isIncome: Boolean(g.is_income) });
+        out.push({ id: c.id as string, label: categoryLabel(g, c), isIncome: Boolean(g.is_income) });
       }
     }
     return out;
@@ -108,7 +108,7 @@ export class ActualStore {
     for (const g of m.categoryGroups as (Raw & { categories?: Raw[] })[]) {
       for (const c of g.categories ?? []) {
         categories.push({
-          id: c.id as string, label: `${g.name} / ${c.name}`,
+          id: c.id as string, label: categoryLabel(g, c),
           hidden: Boolean(c.hidden || g.hidden), isIncome: Boolean(g.is_income),
           budgeted: (c.budgeted as number) ?? 0, spent: (c.spent as number) ?? 0, balance: (c.balance as number) ?? 0,
         });
@@ -123,6 +123,9 @@ export class ActualStore {
    */
   async setBudgeted(month: string, amounts: Record<string, number>): Promise<void> {
     await this.locked(async () => {
+      const known = new Set((await this.budgetMonth(month)).categories.map(c => c.id));
+      const unknown = Object.keys(amounts).filter(id => !known.has(id));
+      if (unknown.length) throw new Error(`unknown category id(s): ${unknown.join(', ')}`);
       await api.batchBudgetUpdates(async () => {
         for (const [id, amount] of Object.entries(amounts)) await api.setBudgetAmount(month, id, amount);
       });
@@ -308,6 +311,9 @@ export class ActualStore {
     return [...totals.values()].sort((a, b) => b.amount - a.amount);
   }
 }
+
+/** "Group / Name", the label every category shows under. */
+function categoryLabel(g: Raw, c: Raw): string { return `${g.name} / ${c.name}`; }
 
 /**
  * Inclusive date range. Actual's AQL keeps only one operator of `{ date: { $gte, $lte } }` and

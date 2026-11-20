@@ -1,5 +1,6 @@
 import * as api from '@actual-app/api';
 import { afterAll, beforeAll, expect, test } from 'vitest';
+import { currentMonth } from '../../src/budget/dates.ts';
 import { ActualStore } from '../../src/actual/store.ts';
 import { buildBudget, daysAgo, type Fixture } from '../helpers/budget.ts';
 
@@ -151,14 +152,19 @@ test('rows carry the payee id; retargetRule repoints a rule and keeps its condit
   await store.deleteRule(id);
 });
 
-const thisMonth = () => daysAgo(0).slice(0, 7);
+const thisMonth = () => currentMonth(new Date());
 
 test('budgetMonth: returns toBudget and per-category budgeted/spent/balance', async () => {
   const m = thisMonth();
   await api.setBudgetAmount(m, fx.ids.coffee, 50000);
+  // The fixture's rows are dated relative to today and may fall in the previous month; pin one inside m.
+  await api.importTransactions(fx.ids.bank, [
+    { date: `${m}-01`, amount: -4200, payee_name: 'ארומה', notes: 'pinned', imported_id: 'pin-m', category: fx.ids.coffee },
+  ] as never);
   const snap = await store.budgetMonth(m);
   const rows = await store.transactions({ from: `${m}-01`, to: `${m}-31`, category: fx.ids.coffee, limit: 100 });
   const spent = rows.reduce((s, r) => s + r.amount, 0);
+  expect(spent).not.toBe(0);
   const coffee = snap.categories.find(c => c.id === fx.ids.coffee)!;
   expect(snap.month).toBe(m);
   expect(Number.isInteger(snap.toBudget)).toBe(true);
@@ -179,4 +185,11 @@ test('budgetMonth: hidden category flagged, income category included and flagged
   const snap = await store.budgetMonth(thisMonth());
   expect(snap.categories.find(c => c.id === fx.ids.old)!.hidden).toBe(true);
   expect(snap.categories.find(c => c.id === fx.ids.salary)).toMatchObject({ isIncome: true, label: 'Income / Salary' });
+});
+
+test('setBudgeted: unknown category id throws a clear error and writes nothing', async () => {
+  const m = thisMonth();
+  const before = (await store.budgetMonth(m)).categories.find(c => c.id === fx.ids.coffee)!.budgeted;
+  await expect(store.setBudgeted(m, { [fx.ids.coffee]: 11111, nope: 5 })).rejects.toThrow(/unknown categor.*nope/);
+  expect((await store.budgetMonth(m)).categories.find(c => c.id === fx.ids.coffee)!.budgeted).toBe(before);
 });
