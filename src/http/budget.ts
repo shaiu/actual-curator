@@ -246,7 +246,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     // A past month also reads the first days of the next one: a late transfer landing there still settles it.
     const viewed: [string, string] = month < currentMonth(now()) ? [`${month}-01`, dayBefore(`${month}-${daysInMonth(month)}`, -GRACE_DAYS)] : monthRange(month);
     const ranges: [string, string][] = [[dayBefore(today, INCOME_WINDOW_DAYS), today], viewed];
-    if (month === currentMonth(now())) ranges.push(monthRange(previousMonth(month)));
+    ranges.push(monthRange(previousMonth(month))); // a row in the first days of this month may settle the previous month's transfer instead
     const income = await incomeRows(ranges);
     const reviewIds = (await store.transactions({ from: day30Before(today), to: today, tag: 'review', limit: 10_000 })).map(r => r.id);
     const firstSaved = budget.firstSavedAt();

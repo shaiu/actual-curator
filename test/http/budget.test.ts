@@ -570,7 +570,7 @@ test('status: a far-past month is read with separate queries per range, not one 
   savePlan();
   await get('/status?month=2026-01');
   const q = store.txQueries.filter(x => x.tag === undefined);
-  expect(q.map(x => [x.from, x.to])).toEqual([['2026-01-01', '2026-02-06'], ['2026-10-16', '2026-11-20']]);
+  expect(q.map(x => [x.from, x.to])).toEqual([['2025-12-01', '2026-02-06'], ['2026-10-16', '2026-11-20']]);
 });
 
 test('status: a past month reads 3+ days into the next month, so a transfer landing Nov 1 settles October', async () => {
@@ -578,4 +578,15 @@ test('status: a past month reads 3+ days into the next month, so a transfer land
   clock = new Date('2026-12-10T09:00:00Z');
   store.rows = [row({ id: 'nov1', date: '2026-11-01', payee: 'Inbal', importedPayee: 'Inbal' })];
   expect((await statusOf('/status?month=2026-10')).events.map((e: any) => e.id)).not.toContain('transfer:2026-10');
+});
+
+test('status: a past month also reads the month before it, so a claimed grace row does not fake a missing transfer', async () => {
+  // expectedDay 5. October has its own row (Oct 5), so the Nov 2 row is November's; without the October rows it looked like a late October one.
+  savePlanOf({ ...plan, incomeSources: [{ name: 'Alimony', payee: 'Inbal', expectedAmount: 5000, expectedDay: 5, fixedTransfer: true }] });
+  clock = new Date('2026-12-09T09:00:00Z');
+  store.rows = [
+    row({ id: 'oct5', date: '2026-10-05', payee: 'Inbal', importedPayee: 'Inbal' }),
+    row({ id: 'nov2', date: '2026-11-02', payee: 'Inbal', importedPayee: 'Inbal' }),
+  ];
+  expect((await statusOf('/status?month=2026-11')).events.map((e: any) => e.id)).not.toContain('transfer:2026-11');
 });
