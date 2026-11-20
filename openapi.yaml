@@ -223,3 +223,84 @@ paths:
       parameters: [{ name: since, in: query, schema: { type: string, format: date-time } }]
       responses:
         "200": { description: OK }
+  /v1/budget/plan:
+    get:
+      summary: The saved budget plan, or null when none is saved. Plan amounts are in SHEKELS (not minor units)
+      responses:
+        "200": { description: "OK: {plan: Plan | null}" }
+    put:
+      summary: Save the plan (shekels, at most 2 decimals). Records by/why in the plan history
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan, by, why]
+              properties: { plan: { type: object }, by: { type: string }, why: { type: string } }
+      responses:
+        "200": { description: "OK: {plan}" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { description: "stale_plan: a plan category is missing or hidden in Actual", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v1/budget/propose:
+    get:
+      summary: Deterministic funding proposal for a month (default current). Amounts are money(). 409 no_plan / stale_plan; 400 past_month
+      parameters: [{ name: month, in: query, schema: { type: string, example: "2026-11" } }]
+      responses:
+        "200": { description: "OK: {proposal, landed:[{source,amount,date}], expected:[{source,expectedDay}], excludedSpentLastMonth}" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/budget/apply:
+    post:
+      summary: Add the given SHEKEL amounts on top of each category's budgeted value. Errors 400 bad_category / over_available / past_month, 409 stale_proposal / no_plan / stale_plan
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [month, proposalId, amounts, approvedBy]
+              properties:
+                month: { type: string, example: "2026-11" }
+                proposalId: { type: string }
+                amounts: { type: object, additionalProperties: { type: number, minimum: 0 }, description: "categoryId to shekels to add" }
+                approvedBy: { type: string }
+      responses:
+        "200": { description: "OK: {month, applied:[{categoryId,label,added,budgeted}], toBudget}" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/budget/move:
+    post:
+      summary: Move SHEKELS between categories. Errors 400 bad_category / protected_source / insufficient_balance / past_month, 409 no_plan / stale_plan
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [month, from, to, amount, approvedBy]
+              properties:
+                month: { type: string, example: "2026-11" }
+                from: { type: string }
+                to: { type: string }
+                amount: { type: number, exclusiveMinimum: 0 }
+                approvedBy: { type: string }
+      responses:
+        "200": { description: "OK: {month, from:{id,label,budgeted,balance}, to:{...}} with the new values" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/budget/status:
+    get:
+      summary: Pace per category, suggested moves (empty for a past month) and unacked events (income, transfer_missing, pace, review)
+      parameters: [{ name: month, in: query, schema: { type: string, example: "2026-11" } }]
+      responses:
+        "200": { description: "OK: {month, today, totals, lines, moves, events}; amounts are money()" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/budget/status/ack:
+    post:
+      summary: Acknowledge events by id so status stops returning them
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, required: [ids], properties: { ids: { type: array, items: { type: string } } } }
+      responses:
+        "200": { description: "OK: {acked: n}" }
+        "400": { $ref: "#/components/responses/Error" }
