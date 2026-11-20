@@ -125,6 +125,20 @@ describe('events', () => {
     expect(view('2026-11', '2026-12-10', [])).toBe(1);
   });
 
+  it('one row, one month: a Dec 1 row that settles a late November transfer does not also settle December', () => {
+    const p = planSchema.parse({ version: 1, categories: [], incomeSources: [
+      { name: 'Alimony', payee: 'Inbal', expectedAmount: 1, expectedDay: 5, fixedTransfer: true }] });
+    const dec1 = row('d1', { date: '2026-12-01', payee: 'Inbal' });
+    const ids = (month: string, income: IncomeRow[]) => buildEvents({ ...base, plan: p, month, today: '2026-12-09', income })
+      .filter((e) => e.kind === 'transfer_missing').map((e) => e.id);
+    expect(ids('2026-12', [dec1])).toEqual(['transfer:2026-12']);
+    expect(ids('2026-11', [dec1])).toEqual([]);
+    // with its own November row, the Dec 1 row belongs to December
+    const nov = row('n5', { date: '2026-11-05', payee: 'Inbal' });
+    expect(ids('2026-12', [nov, dec1])).toEqual([]);
+    expect(ids('2026-11', [nov, dec1])).toEqual([]);
+  });
+
   it('income matching honours the source account', () => {
     const p = planSchema.parse({ version: 1, categories: [],
       incomeSources: [{ name: 'Salary', payee: 'ACME', expectedAmount: 1, expectedDay: 10, account: 'hap' }] });

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { daysInMonth, previousMonth } from './dates.ts';
+import { addMonths, daysInMonth, previousMonth } from './dates.ts';
 import type { PaceLine } from './pace.ts';
 import type { IncomeSource, Plan } from './types.ts';
 
@@ -47,6 +47,28 @@ function transferDue(month: string, expectedDay: number): string {
   return `${next}-${pad(day - D)}`;
 }
 
+/** Last day a late row can still settle `month`'s transfer: its due date, but at least the 3rd of the next month. */
+function graceEnd(month: string, expectedDay: number): string {
+  const next = addMonths(month, 1);
+  const due = transferDue(month, expectedDay);
+  return due > `${next}-03` ? due : `${next}-03`;
+}
+
+/**
+ * Whether source `s`'s transfer for `month` has landed. One row settles one month: a row in the first days of the next
+ * month settles this month only if this month has no row of its own, and then it does not also settle the next month.
+ */
+function transferLanded(s: IncomeSource, month: string, rows: IncomeRow[]): boolean {
+  const mine = rows.filter((r) => matchIncome(s, r));
+  const dated = (m: string) => mine.filter((r) => r.date.startsWith(m));
+  const prev = previousMonth(month);
+  const claimedByPrev = (r: IncomeRow) => dated(prev).length === 0 && r.date <= graceEnd(prev, s.expectedDay);
+  const own = dated(month).filter((r) => !claimedByPrev(r));
+  if (own.length > 0) return true;
+  const end = graceEnd(month, s.expectedDay);
+  return mine.some((r) => r.date.startsWith(addMonths(month, 1)) && r.date <= end);
+}
+
 /** `income` is every candidate row (any dates): income events come from all of it, so a deposit near a month boundary is never lost. */
 export function buildEvents(i: {
   plan: Plan; month: string; today: string; income: IncomeRow[];
@@ -68,7 +90,7 @@ export function buildEvents(i: {
   const missing = (s: IncomeSource, month: string): boolean => {
     const due = transferDue(month, s.expectedDay);
     if (i.today <= due || (i.planSince !== undefined && due < i.planSince)) return false;
-    return !i.income.some((r) => matchIncome(s, r) && r.date >= `${month}-01` && (r.date.startsWith(month) || r.date <= due));
+    return !transferLanded(s, month, i.income);
   };
   const todayMonth = i.today.slice(0, 7);
   for (const s of i.plan.incomeSources) {

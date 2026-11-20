@@ -40,11 +40,14 @@ const moneyMove = (m: Move) => ({ ...m, amount: money(m.amount) });
 const moneyEvent = (e: BudgetEvent) => (e.kind === 'income' ? { ...e, amount: money(e.amount) } : e);
 
 const day30Before = (today: string): string => dayBefore(today, 30);
+const addDay = (date: string): string => dayBefore(date, -1);
 const dayBefore = (date: string, days: number): string => new Date(Date.parse(`${date}T00:00:00Z`) - days * 864e5).toISOString().slice(0, 10);
 /** How far ahead of a month its later months are scanned for carried-over To budget. */
 const LOOKAHEAD_MONTHS = 12;
 /** Income events look back this many days from today, so a deposit near a month boundary is not lost. */
 const INCOME_WINDOW_DAYS = 35;
+/** Days into the next month a past month's rows are read (covers a due date spilling over a 28-day February). */
+const GRACE_DAYS = 6;
 
 export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date): void {
   const { store, budget } = deps;
@@ -79,12 +82,22 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   /** Deposit candidates from on-budget accounts only: income "landed" means money in the budget. */
   const incomeRows = async (ranges: [from: string, to: string][]): Promise<IncomeRow[]> => {
     const off = new Set((await store.accounts()).filter(a => a.offbudget).map(a => a.id));
-    const from = ranges.map(x => x[0]).sort()[0]!;
-    const to = ranges.map(x => x[1]).sort().at(-1)!;
-    const inRanges = (date: string) => ranges.some(([f, t]) => date >= f && date <= t);
-    return (await store.transactions({ from, to, limit: 5000 })).filter(r => !off.has(r.account) && inRanges(r.date))
-      .map(r => ({ id: r.id, date: r.date, amount: r.amount, account: r.account, payee: r.payee,
-        importedPayee: r.importedPayee, transferId: r.transferId }));
+    // Merge ranges that overlap or touch; one query per merged range, so a far-past month never drags a huge span through the row limit.
+    const merged: [string, string][] = [];
+    for (const [f, t] of [...ranges].sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0))) {
+      const last = merged.at(-1);
+      if (last && f <= addDay(last[1])) last[1] = t > last[1] ? t : last[1];
+      else merged.push([f, t]);
+    }
+    const out = new Map<string, IncomeRow>();
+    for (const [from, to] of merged) {
+      for (const r of await store.transactions({ from, to, limit: 5000 })) {
+        if (off.has(r.account)) continue;
+        out.set(r.id, { id: r.id, date: r.date, amount: r.amount, account: r.account, payee: r.payee,
+          importedPayee: r.importedPayee, transferId: r.transferId });
+      }
+    }
+    return [...out.values()];
   };
   const monthRange = (month: string): [string, string] => [`${month}-01`, `${month}-${daysInMonth(month)}`];
   const monthRows = (month: string) => incomeRows([monthRange(month)]);
@@ -230,7 +243,9 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const moves = month < currentMonth(now()) ? [] : suggestMoves(plan, lines, today);
     // Income events look 35 days back from today, plus the queried month, plus (for the current month) the previous
     // one for the transfer check. Row ids are the event ids, so overlapping windows never duplicate an event.
-    const ranges: [string, string][] = [[dayBefore(today, INCOME_WINDOW_DAYS), today], monthRange(month)];
+    // A past month also reads the first days of the next one: a late transfer landing there still settles it.
+    const viewed: [string, string] = month < currentMonth(now()) ? [`${month}-01`, dayBefore(`${month}-${daysInMonth(month)}`, -GRACE_DAYS)] : monthRange(month);
+    const ranges: [string, string][] = [[dayBefore(today, INCOME_WINDOW_DAYS), today], viewed];
     if (month === currentMonth(now())) ranges.push(monthRange(previousMonth(month)));
     const income = await incomeRows(ranges);
     const reviewIds = (await store.transactions({ from: day30Before(today), to: today, tag: 'review', limit: 10_000 })).map(r => r.id);

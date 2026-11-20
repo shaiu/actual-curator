@@ -39,12 +39,17 @@ export class BudgetFiles {
     this.append('plan-history.jsonl', { at: at.toISOString(), by: meta.by, why: meta.why, plan });
   }
 
-  /** When the plan was first saved (first plan-history line), or null if never. */
+  /** When the plan was first saved (first parseable plan-history line), or null if never. */
   firstSavedAt(): Date | null {
     const file = join(this.dir, 'plan-history.jsonl');
     if (!existsSync(file)) return null;
-    const first = readFileSync(file, 'utf8').split('\n').find((l) => l.trim() !== '');
-    return first ? new Date((JSON.parse(first) as { at: string }).at) : null;
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      try {
+        const at = new Date((JSON.parse(line) as { at?: string }).at ?? NaN);
+        if (!Number.isNaN(at.getTime())) return at;
+      } catch { /* a corrupt line is skipped */ }
+    }
+    return null;
   }
 
   journal(entry: object, at: Date): void {

@@ -557,3 +557,25 @@ test('status: reads transactions and accounts once each for income', async () =>
   expect(store.txQueries.filter(q => q.tag === undefined)).toHaveLength(1);
   expect(store.accountCalls).toBe(1);
 });
+
+test('status: planSince is the Jerusalem date of the first save (22:30Z is already the next day)', async () => {
+  // Saved Dec 4 22:30Z = Dec 5 00:30 in Jerusalem. A November transfer (expectedDay 31) was due Dec 4: before the plan.
+  files.savePlan({ ...plan, incomeSources: [{ name: 'Alimony', payee: 'Inbal', expectedAmount: 5000, expectedDay: 31, fixedTransfer: true }] } as never,
+    { by: 't', why: 't' }, new Date('2026-12-04T22:30:00Z'));
+  clock = new Date('2026-12-06T09:00:00Z');
+  expect((await statusOf()).events.map((e: any) => e.id)).not.toContain('transfer:2026-11');
+});
+
+test('status: a far-past month is read with separate queries per range, not one huge span', async () => {
+  savePlan();
+  await get('/status?month=2026-01');
+  const q = store.txQueries.filter(x => x.tag === undefined);
+  expect(q.map(x => [x.from, x.to])).toEqual([['2026-01-01', '2026-02-06'], ['2026-10-16', '2026-11-20']]);
+});
+
+test('status: a past month reads 3+ days into the next month, so a transfer landing Nov 1 settles October', async () => {
+  savePlanOf({ ...plan, incomeSources: [{ name: 'Alimony', payee: 'Inbal', expectedAmount: 5000, expectedDay: 29, fixedTransfer: true }] });
+  clock = new Date('2026-12-10T09:00:00Z');
+  store.rows = [row({ id: 'nov1', date: '2026-11-01', payee: 'Inbal', importedPayee: 'Inbal' })];
+  expect((await statusOf('/status?month=2026-10')).events.map((e: any) => e.id)).not.toContain('transfer:2026-10');
+});
