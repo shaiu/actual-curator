@@ -10,7 +10,8 @@ import { hasTag, parseTags, withTags } from '../notes.ts';
 import type { Vocabulary } from '../vocabulary.ts';
 import { PlanError } from '../budget/propose.ts';
 import type { BudgetFiles } from '../budget/plan-store.ts';
-import { BudgetApiError, registerBudgetRoutes } from './budget.ts';
+import { registerBudgetRoutes } from './budget.ts';
+import { ApiError } from './errors.ts';
 import { bearer } from './auth.ts';
 import { exclusionResolver } from './exclusions.ts';
 import { money } from './format.ts';
@@ -33,16 +34,6 @@ export type ApiDeps = {
   now?: () => Date;
 };
 
-class ApiError extends Error {
-  readonly status: 400 | 404;
-  readonly code: string;
-  constructor(status: 400 | 404, code: string, message: string) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
-
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -54,7 +45,6 @@ export function createApp(deps: ApiDeps): Hono {
 
   app.onError((err, c) => {
     if (err instanceof ApiError) return c.json({ error: { code: err.code, message: err.message } }, err.status);
-    if (err instanceof BudgetApiError) return c.json({ error: { code: err.code, message: err.message } }, err.status);
     if (err instanceof PlanError) return c.json({ error: { code: err.code, message: err.message } }, 409);
     if (err instanceof StaleRowError) return c.json({ error: { code: 'conflict', message: `${err.message}; read it again` } }, 409);
     if (err instanceof z.ZodError) {

@@ -65,10 +65,15 @@ class FakeStore implements ApiStore {
   async spend() { return []; }
   async income() { return []; }
   async budgetMonth(month: string) {
+    if (this.failPrev && month === '2026-10') throw new Error('No budget exists for month: 2026-10');
     if (!this.snaps.has(month)) this.snaps.set(month, snapshot(month));
     return structuredClone(this.snaps.get(month)!);
   }
+  failWrite = false;
+  failPrev = false;
   async setBudgeted(month: string, amounts: Record<string, number>) {
+    await Promise.resolve();
+    if (this.failWrite) throw new Error('boom');
     const s = await this.budgetMonth(month);
     const unknown = Object.keys(amounts).filter(id => !s.categories.some(c => c.id === id));
     if (unknown.length) throw new Error(`unknown category id(s): ${unknown.join(', ')}`);
@@ -326,4 +331,47 @@ test('status: past month allowed with no suggested moves; no plan -> 409', async
 
 test('budget routes need the bearer', async () => {
   expect((await app.request('/v1/budget/plan')).status).toBe(401);
+});
+
+test('apply: two concurrent applies with the same proposalId write once; the other is 409 stale_proposal', async () => {
+  savePlan();
+  const id = await proposalId();
+  const go = () => post('/apply', { month: '2026-11', proposalId: id, amounts: { groc: 10 }, approvedBy: 's' });
+  const rs = await Promise.all([go(), go()]);
+  expect(rs.map(r => r.status).sort()).toEqual([200, 409]);
+  expect(await errCode(rs.find(r => r.status === 409)!)).toBe('stale_proposal');
+  expect(store.writes).toHaveLength(1);
+  expect(store.snaps.get('2026-11')!.categories.find(c => c.id === 'groc')!.budgeted).toBe(101000);
+});
+
+test('apply and move: when setBudgeted throws nothing is journaled', async () => {
+  savePlan();
+  store.failWrite = true;
+  const a = await post('/apply', { month: '2026-11', proposalId: await proposalId(), amounts: { groc: 10 }, approvedBy: 's' });
+  expect(a.status).toBe(500);
+  const m = await post('/move', { month: '2026-11', from: 'fun', to: 'groc', amount: 1, approvedBy: 's' });
+  expect(m.status).toBe(500);
+  expect(existsSync(join(dir, 'budget', 'writes.jsonl'))).toBe(false);
+  store.failWrite = false;
+  expect((await post('/move', { month: '2026-11', from: 'fun', to: 'groc', amount: 1, approvedBy: 's' })).status).toBe(200);
+});
+
+test('propose: excludedSpentLastMonth is 0 when Actual has no budget for the previous month', async () => {
+  savePlan();
+  store.failPrev = true;
+  const r = await get('/propose?month=2026-11');
+  expect(r.status).toBe(200);
+  expect(((await r.json()) as any).excludedSpentLastMonth).toEqual({ amount: 0, formatted: '0.00' });
+});
+
+test('apply: empty amounts -> 400 bad_request', async () => {
+  savePlan();
+  const r = await post('/apply', { month: '2026-11', proposalId: await proposalId(), amounts: {}, approvedBy: 's' });
+  expect(r.status).toBe(400);
+  expect(await errCode(r)).toBe('bad_request');
+});
+
+test('apply: a protected category can be funded', async () => {
+  savePlan();
+  expect((await post('/apply', { month: '2026-11', proposalId: await proposalId(), amounts: { prot: 5 }, approvedBy: 's' })).status).toBe(200);
 });

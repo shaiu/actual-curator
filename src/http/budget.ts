@@ -5,19 +5,9 @@ import { buildEvents, type BudgetEvent, type IncomeRow, incomeStatus } from '../
 import { type Move, pace, type PaceLine, suggestMoves } from '../budget/pace.ts';
 import { checkPlan, PlanError, propose, proposalId } from '../budget/propose.ts';
 import { type MonthSnapshot, type Plan, planSchema } from '../budget/types.ts';
+import { ApiError } from './errors.ts';
 import { money } from './format.ts';
 import type { ApiDeps } from './app.ts';
-
-/** Raised for request-level failures; app.ts maps it to `{error:{code,message}}`. */
-export class BudgetApiError extends Error {
-  readonly status: 400 | 409;
-  readonly code: string;
-  constructor(status: 400 | 409, code: string, message: string) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
 
 const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'expected YYYY-MM');
 /** Shekels with at most 2 decimals. `multipleOf(0.01)` is float-fragile, so compare in agorot. */
@@ -29,7 +19,8 @@ const who = z.string().trim().min(1);
 const putPlanBody = z.object({ plan: planSchema, by: who, why: who });
 const applyBody = z.object({
   month: monthSchema, proposalId: z.string().min(1),
-  amounts: z.record(z.string().min(1), shekels.refine(x => x >= 0, 'must be >= 0')), approvedBy: who,
+  amounts: z.record(z.string().min(1), shekels.refine(x => x >= 0, 'must be >= 0'))
+    .refine(a => Object.keys(a).length > 0, 'needs at least one category'), approvedBy: who,
 });
 const moveBody = z.object({
   month: monthSchema, from: z.string().min(1), to: z.string().min(1),
@@ -57,11 +48,19 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   const { store, budget } = deps;
   const g = '/budget';
 
+  // Serializes read -> validate -> write -> journal for apply and move. Not the store's lock: setBudgeted takes that one.
+  let tail: Promise<unknown> = Promise.resolve();
+  const exclusive = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = tail.then(fn, fn);
+    tail = run.catch(() => {});
+    return run;
+  };
+
   const body = async <T extends z.ZodType>(c: Context, schema: T): Promise<z.output<T>> =>
     schema.parse(await c.req.json().catch(() => ({})));
   const monthParam = (c: Context): string => monthSchema.parse(c.req.query('month') ?? currentMonth(now()));
   const writable = (month: string): void => {
-    if (month < currentMonth(now())) throw new BudgetApiError(400, 'past_month', `${month} is in the past and read-only`);
+    if (month < currentMonth(now())) throw new ApiError(400, 'past_month', `${month} is in the past and read-only`);
   };
   const needPlan = (): Plan => {
     const plan = budget.plan();
@@ -87,7 +86,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   app.put(`${g}/plan`, async c => {
     const b = await body(c, putPlanBody);
     const bad = planAmounts(b.plan).filter(x => !hasAgorotPrecision(x));
-    if (bad.length) throw new BudgetApiError(400, 'bad_request', `plan amounts need at most 2 decimals: ${bad.join(', ')}`);
+    if (bad.length) throw new ApiError(400, 'bad_request', `plan amounts need at most 2 decimals: ${bad.join(', ')}`);
     checkPlan(b.plan, await store.budgetMonth(currentMonth(now())));
     budget.savePlan(b.plan, { by: b.by, why: b.why }, now());
     return c.json({ plan: b.plan });
@@ -99,9 +98,10 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const { plan, snap } = await load(month);
     const p = propose(plan, snap);
     const { landed, expected } = incomeStatus(plan, month, await monthRows(month));
-    const prev = await store.budgetMonth(previousMonth(month));
+    // Actual throws "No budget exists for month" before its earliest month; that just means nothing was spent.
+    const prev = await store.budgetMonth(previousMonth(month)).catch(() => null);
     const excluded = new Set(plan.categories.filter(x => x.kind === 'excluded').map(x => x.categoryId));
-    const excludedSpent = prev.categories.filter(x => excluded.has(x.id)).reduce((s, x) => s - x.spent, 0);
+    const excludedSpent = (prev?.categories ?? []).filter(x => excluded.has(x.id)).reduce((s, x) => s - x.spent, 0);
     return c.json({
       proposal: { ...p, available: money(p.available), proposed: money(p.proposed), remaining: money(p.remaining),
         lines: p.lines.map(l => ({ ...l, planned: money(l.planned), budgeted: money(l.budgeted),
@@ -112,7 +112,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     });
   });
 
-  app.post(`${g}/apply`, async c => {
+  app.post(`${g}/apply`, c => exclusive(async () => {
     const b = await body(c, applyBody);
     writable(b.month);
     const { plan, snap } = await load(b.month);
@@ -123,15 +123,15 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
       return !cat || cat.hidden || cat.isIncome || excluded.has(id);
     });
     if (bad.length) {
-      throw new BudgetApiError(400, 'bad_category', `not fundable (unknown, excluded, income or hidden): ${bad.join(', ')}`);
+      throw new ApiError(400, 'bad_category', `not fundable (unknown, excluded, income or hidden): ${bad.join(', ')}`);
     }
     if (b.proposalId !== proposalId(snap)) {
-      throw new BudgetApiError(409, 'stale_proposal', 'To budget or a budgeted amount changed since the proposal; propose again');
+      throw new ApiError(409, 'stale_proposal', 'To budget or a budgeted amount changed since the proposal; propose again');
     }
     const added = Object.entries(b.amounts).map(([id, shekel]) => ({ cat: byId.get(id)!, added: toMinor(shekel) }));
     const total = added.reduce((s, a) => s + a.added, 0);
     if (total > snap.toBudget) {
-      throw new BudgetApiError(400, 'over_available', `adds ${money(total).formatted} but only ${money(snap.toBudget).formatted} is to budget`);
+      throw new ApiError(400, 'over_available', `adds ${money(total).formatted} but only ${money(snap.toBudget).formatted} is to budget`);
     }
     const absolute = Object.fromEntries(added.map(a => [a.cat.id, a.cat.budgeted + a.added]));
     await store.setBudgeted(b.month, absolute);
@@ -140,9 +140,9 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     return c.json({ month: b.month,
       applied: added.map(a => ({ categoryId: a.cat.id, label: a.cat.label, added: money(a.added), budgeted: money(a.cat.budgeted + a.added) })),
       toBudget: money(snap.toBudget - total) });
-  });
+}));
 
-  app.post(`${g}/move`, async c => {
+  app.post(`${g}/move`, c => exclusive(async () => {
     const b = await body(c, moveBody);
     writable(b.month);
     const { plan, snap } = await load(b.month);
@@ -153,17 +153,17 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
       return cat && !cat.hidden && !cat.isIncome && planOf.get(id)?.kind !== 'excluded' ? cat : undefined;
     };
     const from = byId.get(b.from);
-    if (!from || from.hidden || from.isIncome) throw new BudgetApiError(400, 'bad_category', `unknown source category ${b.from}`);
+    if (!from || from.hidden || from.isIncome) throw new ApiError(400, 'bad_category', `unknown source category ${b.from}`);
     const fromPlan = planOf.get(b.from);
     if (fromPlan?.protected || fromPlan?.kind === 'excluded') {
-      throw new BudgetApiError(400, 'protected_source', `${from.label} is ${fromPlan.kind === 'excluded' ? 'excluded' : 'protected'} and cannot fund moves`);
+      throw new ApiError(400, 'protected_source', `${from.label} is ${fromPlan.kind === 'excluded' ? 'excluded' : 'protected'} and cannot fund moves`);
     }
     const to = usable(b.to);
-    if (!to) throw new BudgetApiError(400, 'bad_category', `destination ${b.to} is unknown, excluded, income or hidden`);
-    if (from.id === to.id) throw new BudgetApiError(400, 'bad_request', 'from and to are the same category');
+    if (!to) throw new ApiError(400, 'bad_category', `destination ${b.to} is unknown, excluded, income or hidden`);
+    if (from.id === to.id) throw new ApiError(400, 'bad_request', 'from and to are the same category');
     const amount = toMinor(b.amount);
     if (amount > from.balance) {
-      throw new BudgetApiError(400, 'insufficient_balance', `${from.label} holds ${money(from.balance).formatted}, cannot move ${money(amount).formatted}`);
+      throw new ApiError(400, 'insufficient_balance', `${from.label} holds ${money(from.balance).formatted}, cannot move ${money(amount).formatted}`);
     }
     const amounts = { [from.id]: from.budgeted - amount, [to.id]: to.budgeted + amount };
     await store.setBudgeted(b.month, amounts);
@@ -172,7 +172,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const out = (cat: typeof from, delta: number) => ({ id: cat.id, label: cat.label,
       budgeted: money(cat.budgeted + delta), balance: money(cat.balance + delta) });
     return c.json({ month: b.month, from: out(from, -amount), to: out(to, amount) });
-  });
+}));
 
   app.get(`${g}/status`, async c => {
     const month = monthParam(c);
