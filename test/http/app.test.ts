@@ -62,6 +62,8 @@ class FakeStore implements ApiStore {
   async spend(q: { exclude?: readonly string[] }) { this.excludes.push(q.exclude); return this.spendRows; }
   async income(q: { exclude?: readonly string[] }) { this.excludes.push(q.exclude); return [{ key: 'sal', label: 'Income / Salary', amount: 1500000 }]; }
   async budgetMonth(month: string) { return { month, toBudget: 0, categories: [] }; }
+  async budgetMonths() { return [] as string[]; }
+  async accounts() { return [] as { id: string; name: string; offbudget: boolean }[]; }
   async setBudgeted() {}
 }
 

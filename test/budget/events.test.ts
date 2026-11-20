@@ -11,9 +11,9 @@ const plan = planSchema.parse({
   ],
 });
 const row = (id: string, o: Partial<IncomeRow> = {}): IncomeRow => ({
-  id, date: '2026-11-10', amount: 2000000, payee: 'ACME LTD', importedPayee: null, transferId: null, ...o,
+  id, date: '2026-11-10', amount: 2000000, payee: 'ACME LTD', importedPayee: null, transferId: null, account: 'hap', ...o,
 });
-const base = { plan, month: '2026-11', today: '2026-11-12', income: [] as IncomeRow[], lines: [] as PaceLine[], reviewCount: 0, acked: {} };
+const base = { plan, month: '2026-11', today: '2026-11-12', income: [] as IncomeRow[], lines: [] as PaceLine[], reviewIds: [] as string[], acked: {} };
 const line = (status: 'ok' | 'watch' | 'off'): PaceLine => ({
   categoryId: 'dining', label: 'Dining', kind: 'variable', budgeted: 1, spent: 1, balance: 0, expectedByToday: 1, projected: 1, status,
 });
@@ -48,13 +48,13 @@ describe('events', () => {
 
   it('transfer_missing only after expectedDay+3', () => {
     const at = (today: string, month = '2026-11') => buildEvents({ ...base, month, today })
-      .filter((e) => e.kind === 'transfer_missing');
+      .filter((e) => e.kind === 'transfer_missing' && e.id === `transfer:${month}`);
     expect(at('2026-11-08')).toEqual([]);
     expect(at('2026-11-09')).toEqual([{ id: 'transfer:2026-11', kind: 'transfer_missing', source: 'Transfer', expectedDay: 5 }]);
     expect(at('2026-11-01', '2026-12')).toEqual([]);
     expect(at('2026-12-01')).toHaveLength(1);
     const landed = buildEvents({ ...base, today: '2026-11-20', income: [row('9', { payee: 'Inbal' })] });
-    expect(landed.filter((e) => e.kind === 'transfer_missing')).toEqual([]);
+    expect(landed.filter((e) => e.id === 'transfer:2026-11')).toEqual([]);
   });
 
   it('watch to off emits a new pace event', () => {
@@ -66,10 +66,43 @@ describe('events', () => {
     expect(paceOnly(buildEvents({ ...base, lines: [line('ok')] }))).toEqual([]);
   });
 
-  it('review event once per day when count > 0', () => {
-    expect(buildEvents({ ...base, reviewCount: 3 }).filter((e) => e.kind === 'review'))
-      .toEqual([{ id: 'review:2026-11-12', kind: 'review', count: 3 }]);
-    expect(buildEvents({ ...base, reviewCount: 0 }).filter((e) => e.kind === 'review')).toEqual([]);
+  it('review event id hashes the sorted row ids: same rows keep the id on another day, new rows change it', () => {
+    const rev = (o: object) => buildEvents({ ...base, ...o }).filter((e) => e.kind === 'review');
+    const a = rev({ reviewIds: ['r3', 'r1', 'r2'] });
+    expect(a).toHaveLength(1);
+    expect(a[0]).toMatchObject({ kind: 'review', count: 3 });
+    expect(a[0]!.id).toMatch(/^review:[0-9a-f]{12}$/);
+    expect(rev({ reviewIds: ['r1', 'r2', 'r3'], today: '2026-11-13' })[0]!.id).toBe(a[0]!.id);
+    expect(rev({ reviewIds: ['r1', 'r2', 'r3', 'r4'] })[0]!.id).not.toBe(a[0]!.id);
+    expect(rev({ reviewIds: [] })).toEqual([]);
+  });
+
+  it('income: a row from the previous month still yields an event (month boundary)', () => {
+    const ev = buildEvents({ ...base, month: '2026-12', today: '2026-12-02', income: [row('b', { date: '2026-11-30' })] });
+    expect(ev.filter((e) => e.kind === 'income').map((e) => e.id)).toEqual(['income:b']);
+  });
+
+  it('transfer_missing for the previous month when expectedDay+3 spills past month end', () => {
+    // Transfer expectedDay 5 -> use a source expected on day 29: Nov has 30 days, due = Dec 2
+    const p = planSchema.parse({ version: 1, categories: [],
+      incomeSources: [{ name: 'Late', payee: 'Inbal', expectedAmount: 1, expectedDay: 29, fixedTransfer: true }] });
+    const at = (today: string, income: IncomeRow[] = []) => buildEvents({ ...base, plan: p, month: today.slice(0, 7), today, income })
+      .filter((e) => e.id === 'transfer:2026-11');
+    expect(at('2026-11-30')).toEqual([]);
+    expect(at('2026-12-02')).toEqual([]);
+    expect(at('2026-12-03')).toEqual([{ id: 'transfer:2026-11', kind: 'transfer_missing', source: 'Late', expectedDay: 29 }]);
+    expect(at('2026-12-03', [row('l', { date: '2026-11-29', payee: 'Inbal' })])).toEqual([]);
+    expect(at('2026-12-03', [row('l', { date: '2026-12-01', payee: 'Inbal' })])).toEqual([]); // landed inside the grace window
+  });
+
+  it('income matching honours the source account', () => {
+    const p = planSchema.parse({ version: 1, categories: [],
+      incomeSources: [{ name: 'Salary', payee: 'ACME', expectedAmount: 1, expectedDay: 10, account: 'hap' }] });
+    const ev = buildEvents({ ...base, plan: p, income: [row('1', { account: 'hap' }), row('2', { account: 'other' })] });
+    expect(ev.filter((e) => e.kind === 'income').map((e) => e.id)).toEqual(['income:1']);
+    expect(incomeStatus(p, '2026-11', [row('2', { account: 'other' })]).expected.map((s) => s.name)).toEqual(['Salary']);
+    expect(matchIncome(p.incomeSources[0]!, row('3', { account: 'other' }))).toBe(false);
+    expect(matchIncome(plan.incomeSources[0]!, row('4', { account: 'other' }))).toBe(true);
   });
 
   it('status — acked income event not re-emitted, unacked one repeats', () => {

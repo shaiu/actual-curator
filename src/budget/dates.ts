@@ -20,3 +20,11 @@ export function monthsBetween(from: string, to: string): number {
   const [ty, tm] = to.split('-').map(Number) as [number, number];
   return (ty - fy) * 12 + (tm - fm) + 1;
 }
+
+export function addMonths(month: string, n: number): string {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  const i = y * 12 + (m - 1) + n;
+  return `${Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`;
+}
+
+export const previousMonth = (month: string): string => addMonths(month, -1);

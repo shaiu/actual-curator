@@ -39,6 +39,17 @@ describe('pace', () => {
     expect(status(2800, 600, '2026-11-02').status).toBe('watch');
   });
 
+  it('carried-over balance is not overspend: 3000 carry-in, 2800 budget, 3500 spent by day 20 is not off', () => {
+    const carried = pace(vplan, snap([c('dining', 2800, 3500, { balance: NIS(2300) })]), '2026-11-20')[0]!;
+    expect(carried.status).toBe('ok');
+    // spending beyond carry-in plus the pace line still counts: effExcess = 5600 - 1866.67 - 3000 = 733.33
+    const over = pace(vplan, snap([c('dining', 2800, 5600, { balance: NIS(200) })]), '2026-11-20')[0]!;
+    expect(over.status).toBe('off');
+    // day 10, spent 1200, expected 933.33: carry-in 100 leaves 166.67 (watch), carry-in 200 leaves 66.67 (ok)
+    expect(pace(vplan, snap([c('dining', 2800, 1200, { balance: NIS(1700) })]), '2026-11-10')[0]!.status).toBe('watch');
+    expect(pace(vplan, snap([c('dining', 2800, 1200, { balance: NIS(1800) })]), '2026-11-10')[0]!.status).toBe('ok');
+  });
+
   it('projection starts at day 7: d=6 is watch at most, d=7 is off', () => {
     expect(status(2800, 1000, '2026-11-06').status).toBe('watch');
     expect(status(2800, 1000, '2026-11-07').status).toBe('off');
@@ -168,6 +179,17 @@ describe('suggestMoves', () => {
     const carry = snap([c('a', 1000, 1200), cat('src', { budgeted: NIS(1000), balance: NIS(1400) })], '2026-12');
     const m = suggestMoves(p3, pace(p3, carry, '2026-11-15'), '2026-11-15');
     expect(m).toEqual([{ from: 'src', fromLabel: 'src', to: 'a', toLabel: 'a', amount: NIS(400) }]);
+  });
+
+  it('shortfall nets out the carry-in: max(-balance, effExcess)', () => {
+    const p4 = plan([
+      { categoryId: 'a', kind: 'variable', priority: 1, amount: 1000 },
+      { categoryId: 'src', kind: 'variable', priority: 2, amount: 1000 },
+    ]);
+    // a: budget 1000, carry-in 500, spent 1600 at day 15 -> balance -100, expected 500, effExcess 1600-500-500 = 600
+    const s = snap([c('a', 1000, 1600, { balance: NIS(-100) }), cat('src', { budgeted: NIS(1000), balance: NIS(2100) })]);
+    const m = suggestMoves(p4, pace(p4, s, today), today);
+    expect(m).toEqual([{ from: 'src', fromLabel: 'src', to: 'a', toLabel: 'a', amount: NIS(600) }]);
   });
 
   it('a watch source is never a move source', () => {

@@ -1,9 +1,10 @@
 import type { Context, Hono } from 'hono';
 import { z } from 'zod';
-import { currentMonth, daysInMonth, jerusalemToday } from '../budget/dates.ts';
+import { BudgetWriteUnconfirmedError } from '../actual/store.ts';
+import { addMonths, currentMonth, daysInMonth, jerusalemToday, previousMonth } from '../budget/dates.ts';
 import { buildEvents, type BudgetEvent, type IncomeRow, incomeStatus } from '../budget/events.ts';
 import { type Move, pace, type PaceLine, suggestMoves } from '../budget/pace.ts';
-import { checkPlan, PlanError, propose, proposalId } from '../budget/propose.ts';
+import { availableFor, checkPlan, PlanError, propose, proposalId } from '../budget/propose.ts';
 import { type MonthSnapshot, type Plan, planSchema } from '../budget/types.ts';
 import { ApiError } from './errors.ts';
 import { money } from './format.ts';
@@ -38,11 +39,12 @@ const moneyPace = (l: PaceLine) => ({ ...l, budgeted: money(l.budgeted), spent: 
 const moneyMove = (m: Move) => ({ ...m, amount: money(m.amount) });
 const moneyEvent = (e: BudgetEvent) => (e.kind === 'income' ? { ...e, amount: money(e.amount) } : e);
 
-const day30Before = (today: string): string => new Date(Date.parse(`${today}T00:00:00Z`) - 30 * 864e5).toISOString().slice(0, 10);
-const previousMonth = (month: string): string => {
-  const [y, m] = month.split('-').map(Number) as [number, number];
-  return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
-};
+const day30Before = (today: string): string => dayBefore(today, 30);
+const dayBefore = (date: string, days: number): string => new Date(Date.parse(`${date}T00:00:00Z`) - days * 864e5).toISOString().slice(0, 10);
+/** How far ahead of a month its later months are scanned for carried-over To budget. */
+const LOOKAHEAD_MONTHS = 12;
+/** Income events look back this many days from today, so a deposit near a month boundary is not lost. */
+const INCOME_WINDOW_DAYS = 35;
 
 export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date): void {
   const { store, budget } = deps;
@@ -74,10 +76,38 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     checkPlan(plan, snap);
     return { plan, snap };
   };
-  const monthRows = async (month: string): Promise<IncomeRow[]> =>
-    (await store.transactions({ from: `${month}-01`, to: `${month}-${daysInMonth(month)}`, limit: 1000 }))
-      .map(r => ({ id: r.id, date: r.date, amount: r.amount, payee: r.payee, importedPayee: r.importedPayee,
-        transferId: r.transferId }));
+  /** Deposit candidates from on-budget accounts only: income "landed" means money in the budget. */
+  const incomeRows = async (from: string, to: string): Promise<IncomeRow[]> => {
+    const off = new Set((await store.accounts()).filter(a => a.offbudget).map(a => a.id));
+    return (await store.transactions({ from, to, limit: 5000 })).filter(r => !off.has(r.account))
+      .map(r => ({ id: r.id, date: r.date, amount: r.amount, account: r.account, payee: r.payee,
+        importedPayee: r.importedPayee, transferId: r.transferId }));
+  };
+  const monthRows = (month: string) => incomeRows(`${month}-01`, `${month}-${daysInMonth(month)}`);
+  /**
+   * toBudget of every later month Actual has data for (up to a year ahead), in month order. A later month's To budget
+   * includes this month's leftover, so what is free to give this month is the minimum across all of them.
+   */
+  const laterToBudgets = async (month: string): Promise<number[]> => {
+    const last = addMonths(month, LOOKAHEAD_MONTHS);
+    const months = (await store.budgetMonths()).filter(m => m > month && m <= last).sort();
+    const out: number[] = [];
+    for (const m of months) out.push((await store.budgetMonth(m)).toBudget);
+    return out;
+  };
+  /** Read the latest from the Actual server before reading local state; never decide on stale data. */
+  const freshSync = async (): Promise<void> => {
+    try { await store.sync(); } catch (e) {
+      throw new ApiError(503, 'sync_failed', `could not sync with the Actual server: ${(e as Error).message}`);
+    }
+  };
+  /** The write may have landed even though Actual did not confirm it: leave a trace, then surface the error. */
+  const guardedWrite = async (month: string, amounts: Record<string, number>, entry: object): Promise<void> => {
+    try { await store.setBudgeted(month, amounts); } catch (e) {
+      if (e instanceof BudgetWriteUnconfirmedError) budget.journal({ ...entry, outcome: 'unconfirmed' }, now());
+      throw e;
+    }
+  };
   /** Push to the Actual server now; a failure only delays it to the next run's sync. */
   const push = () => store.sync().catch(e => console.error(`sync after budget write failed: ${(e as Error).message}`));
 
@@ -95,8 +125,9 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   app.get(`${g}/propose`, async c => {
     const month = monthParam(c);
     writable(month);
+    await freshSync();
     const { plan, snap } = await load(month);
-    const p = propose(plan, snap);
+    const p = propose(plan, snap, await laterToBudgets(month));
     const { landed, expected } = incomeStatus(plan, month, await monthRows(month));
     // Actual throws "No budget exists for month" before its earliest month; that just means nothing was spent.
     const prev = await store.budgetMonth(previousMonth(month)).catch((e: unknown) => {
@@ -118,7 +149,9 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   app.post(`${g}/apply`, c => exclusive(async () => {
     const b = await body(c, applyBody);
     writable(b.month);
+    await freshSync();
     const { plan, snap } = await load(b.month);
+    const later = await laterToBudgets(b.month);
     const byId = new Map(snap.categories.map(x => [x.id, x]));
     const excluded = new Set(plan.categories.filter(x => x.kind === 'excluded').map(x => x.categoryId));
     const bad = Object.keys(b.amounts).filter(id => {
@@ -128,17 +161,19 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     if (bad.length) {
       throw new ApiError(400, 'bad_category', `not fundable (unknown, excluded, income or hidden): ${bad.join(', ')}`);
     }
-    if (b.proposalId !== proposalId(snap)) {
+    if (b.proposalId !== proposalId(snap, later)) {
       throw new ApiError(409, 'stale_proposal', 'To budget or a budgeted amount changed since the proposal; propose again');
     }
     const added = Object.entries(b.amounts).map(([id, shekel]) => ({ cat: byId.get(id)!, added: toMinor(shekel) }));
     const total = added.reduce((s, a) => s + a.added, 0);
-    if (total > snap.toBudget) {
-      throw new ApiError(400, 'over_available', `adds ${money(total).formatted} but only ${money(snap.toBudget).formatted} is to budget`);
+    const available = availableFor(snap, later);
+    if (total > available) {
+      throw new ApiError(400, 'over_available', `adds ${money(total).formatted} but only ${money(available).formatted} is available`);
     }
     const absolute = Object.fromEntries(added.map(a => [a.cat.id, a.cat.budgeted + a.added]));
-    await store.setBudgeted(b.month, absolute);
-    budget.journal({ op: 'apply', month: b.month, approvedBy: b.approvedBy, amounts: absolute, added: Object.fromEntries(added.map(a => [a.cat.id, a.added])) }, now());
+    const entry = { op: 'apply', month: b.month, approvedBy: b.approvedBy, amounts: absolute, added: Object.fromEntries(added.map(a => [a.cat.id, a.added])) };
+    await guardedWrite(b.month, absolute, entry);
+    budget.journal(entry, now());
     await push();
     return c.json({ month: b.month,
       applied: added.map(a => ({ categoryId: a.cat.id, label: a.cat.label, added: money(a.added), budgeted: money(a.cat.budgeted + a.added) })),
@@ -148,6 +183,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   app.post(`${g}/move`, c => exclusive(async () => {
     const b = await body(c, moveBody);
     writable(b.month);
+    await freshSync();
     const { plan, snap } = await load(b.month);
     const byId = new Map(snap.categories.map(x => [x.id, x]));
     const planOf = new Map(plan.categories.map(x => [x.categoryId, x]));
@@ -158,7 +194,10 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const from = byId.get(b.from);
     if (!from || from.hidden || from.isIncome) throw new ApiError(400, 'bad_category', `unknown source category ${b.from}`);
     const fromPlan = planOf.get(b.from);
-    if (fromPlan?.protected || fromPlan?.kind === 'excluded') {
+    if (!fromPlan) {
+      throw new ApiError(400, 'protected_source', `${from.label} is not in the plan and cannot fund moves; add it to the plan first`);
+    }
+    if (fromPlan.protected || fromPlan.kind === 'excluded') {
       throw new ApiError(400, 'protected_source', `${from.label} is ${fromPlan.kind === 'excluded' ? 'excluded' : 'protected'} and cannot fund moves`);
     }
     const to = usable(b.to);
@@ -169,8 +208,9 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
       throw new ApiError(400, 'insufficient_balance', `${from.label} holds ${money(from.balance).formatted}, cannot move ${money(amount).formatted}`);
     }
     const amounts = { [from.id]: from.budgeted - amount, [to.id]: to.budgeted + amount };
-    await store.setBudgeted(b.month, amounts);
-    budget.journal({ op: 'move', month: b.month, approvedBy: b.approvedBy, from: from.id, to: to.id, amount, amounts }, now());
+    const entry = { op: 'move', month: b.month, approvedBy: b.approvedBy, from: from.id, to: to.id, amount, amounts };
+    await guardedWrite(b.month, amounts, entry);
+    budget.journal(entry, now());
     await push();
     const out = (cat: typeof from, delta: number) => ({ id: cat.id, label: cat.label,
       budgeted: money(cat.budgeted + delta), balance: money(cat.balance + delta) });
@@ -184,9 +224,13 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const today = jerusalemToday(now());
     const lines = pace(plan, snap, today);
     const moves = month < currentMonth(now()) ? [] : suggestMoves(plan, lines, today);
-    const income = await monthRows(month);
-    const reviewCount = (await store.transactions({ from: day30Before(today), to: today, tag: 'review', limit: 10_000 })).length;
-    const events = buildEvents({ plan, month, today, income, lines, reviewCount, acked: budget.state().acked });
+    // Income events look 35 days back from today, plus the queried month, plus (for the current month) the previous
+    // one for the transfer check. Row ids are the event ids, so overlapping windows never duplicate an event.
+    const rowSets = [await incomeRows(dayBefore(today, INCOME_WINDOW_DAYS), today), await monthRows(month)];
+    if (month === currentMonth(now())) rowSets.push(await monthRows(previousMonth(month)));
+    const income = [...new Map(rowSets.flat().map(r => [r.id, r])).values()];
+    const reviewIds = (await store.transactions({ from: day30Before(today), to: today, tag: 'review', limit: 10_000 })).map(r => r.id);
+    const events = buildEvents({ plan, month, today, income, lines, reviewIds, acked: budget.state().acked });
     const sum = (f: (l: PaceLine) => number) => lines.reduce((s, l) => s + f(l), 0);
     return c.json({ month, today,
       totals: { budgeted: money(sum(l => l.budgeted)), spent: money(sum(l => l.spent)), balance: money(sum(l => l.balance)) },

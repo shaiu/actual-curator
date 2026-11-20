@@ -44,6 +44,14 @@ export class StaleRowError extends Error {
   }
 }
 
+/** `setBudgeted` could not read its writes back in time; the write may or may not have landed. */
+export class BudgetWriteUnconfirmedError extends Error {
+  constructor(month: string) {
+    super(`Actual did not apply the budgeted amounts for ${month}`);
+    this.name = 'BudgetWriteUnconfirmedError';
+  }
+}
+
 /**
  * The only module that talks to `@actual-app/api`. The API is a process-wide
  * singleton holding one open budget, so there is one store per process.
@@ -101,6 +109,11 @@ export class ActualStore {
     return out;
   }
 
+  /** Every month (YYYY-MM, ascending) Actual has budget data for. */
+  async budgetMonths(): Promise<string[]> {
+    return [...(await api.getBudgetMonths())].sort();
+  }
+
   /** One month's envelope snapshot, every amount in minor units. Hidden and income categories are included, flagged. */
   async budgetMonth(month: string): Promise<MonthSnapshot> {
     const m = await api.getBudgetMonth(month);
@@ -134,7 +147,7 @@ export class ActualStore {
         return Object.entries(amounts).every(([id, a]) => snap.categories.find(c => c.id === id)?.budgeted === a);
       };
       for (let waited = 0; !(await applied()); waited += 25) {
-        if (waited >= 2000) throw new Error(`Actual did not apply the budgeted amounts for ${month}`);
+        if (waited >= 2000) throw new BudgetWriteUnconfirmedError(month);
         await new Promise(r => setTimeout(r, 25));
       }
     });

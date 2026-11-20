@@ -136,3 +136,26 @@ describe('proposalId', () => {
     expect(propose(p, base).proposalId).toBe(proposalId(base));
   });
 });
+
+describe('available across later months (Actual carry-over)', () => {
+  const p = plan([{ categoryId: 'rent', kind: 'fixed', priority: 1, amount: 4000 }]);
+  const s = snap(3700000, [cat('rent')], '2026-11');
+  it('available is the minimum toBudget from this month through the later ones', () => {
+    const r = propose(p, s, [100000, 2500000]);
+    expect(r.available).toBe(100000);
+    expect(r.lines[0]).toMatchObject({ propose: 100000, unfunded: 300000 });
+    expect(r.remaining).toBe(0);
+  });
+  it('a larger later month does not raise it; no later months leaves it alone', () => {
+    expect(propose(p, snap(100000, [cat('rent')]), [9000000]).available).toBe(100000);
+    expect(propose(p, s).available).toBe(3700000);
+  });
+  it('proposalId folds in every later toBudget, in order', () => {
+    const id = proposalId(s, [100, 200]);
+    expect(proposalId(s, [100, 201])).not.toBe(id);
+    expect(proposalId(s, [101, 200])).not.toBe(id);
+    expect(proposalId(s, [100, 200, 300])).not.toBe(id);
+    expect(proposalId(s, [100, 200])).toBe(id);
+    expect(propose(p, s, [100, 200]).proposalId).toBe(id);
+  });
+});

@@ -1,7 +1,9 @@
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { beforeEach, expect, test } from 'vitest';
+import { BudgetWriteUnconfirmedError } from '../../src/actual/store.ts';
 import type { CuratorRow } from '../../src/actual/types.ts';
 import type { CategoryOption } from '../../src/classifier/types.ts';
 import { BudgetFiles } from '../../src/budget/plan-store.ts';
@@ -51,7 +53,17 @@ class FakeStore implements ApiStore {
   rows: CuratorRow[] = [];
   writes: { month: string; amounts: Record<string, number> }[] = [];
   txQueries: { from: string; to: string; tag?: string; limit: number }[] = [];
-  async sync() {}
+  failSync = false;
+  syncs = 0;
+  onSync: (() => void) | undefined;
+  months = ['2026-10', '2026-11', '2026-12'];
+  async sync() {
+    this.syncs++;
+    if (this.failSync) throw new Error('server unreachable');
+    this.onSync?.();
+  }
+  async budgetMonths() { return [...this.months]; }
+  async accounts() { return [{ id: 'a', name: 'Bank', offbudget: false }, { id: 'off', name: 'Savings', offbudget: true }]; }
   async categories() { return [] as CategoryOption[]; }
   async transactions(q: { from: string; to: string; tag?: string; limit: number }) {
     this.txQueries.push(q);
@@ -69,26 +81,36 @@ class FakeStore implements ApiStore {
     if (!this.snaps.has(month)) this.snaps.set(month, snapshot(month));
     return structuredClone(this.snaps.get(month)!);
   }
-  failWrite = false;
+  failWrite: boolean | 'unconfirmed' = false;
   failPrev: string | false = false;
   async setBudgeted(month: string, amounts: Record<string, number>) {
     await Promise.resolve();
+    if (this.failWrite === 'unconfirmed') throw new BudgetWriteUnconfirmedError(month);
     if (this.failWrite) throw new Error('boom');
     const s = await this.budgetMonth(month);
     const unknown = Object.keys(amounts).filter(id => !s.categories.some(c => c.id === id));
     if (unknown.length) throw new Error(`unknown category id(s): ${unknown.join(', ')}`);
     this.writes.push({ month, amounts });
+    let delta = 0;
     for (const [id, a] of Object.entries(amounts)) {
       const c = s.categories.find(x => x.id === id)!;
-      s.toBudget -= a - c.budgeted;
+      delta += a - c.budgeted;
       c.balance += a - c.budgeted;
       c.budgeted = a;
     }
+    s.toBudget -= delta;
     this.snaps.set(month, s);
+    // Envelope carry-over: what a month gives away is also missing from every later month's To budget.
+    for (const m of this.months.filter(x => x > month)) {
+      const later = await this.budgetMonth(m);
+      later.toBudget -= delta;
+      this.snaps.set(m, later);
+    }
   }
 }
 
 let store: FakeStore;
+let clock: Date;
 let files: BudgetFiles;
 let dir: string;
 let app: ReturnType<typeof createApp>;
@@ -102,12 +124,13 @@ const errCode = async (r: Response) => ((await r.json()) as { error: { code: str
 const savePlan = () => files.savePlan(plan as never, { by: 't', why: 't' }, new Date());
 
 beforeEach(() => {
+  clock = new Date('2026-11-20T09:00:00Z');
   store = new FakeStore();
   dir = mkdtempSync(join(tmpdir(), 'curator-budget-'));
   files = new BudgetFiles(dir);
   app = createApp({ store, log: new DecisionLog(dir), vocab, cfg: { token: 'secret', currency: 'ILS' }, classifierName: 'fake',
     runNow: async () => { throw new Error('unused'); }, versions: { curator: '0.2.0', actualApi: '1', server: '1' },
-    status: () => ({}), budget: files, now: () => new Date('2026-11-20T09:00:00Z') });
+    status: () => ({}), budget: files, now: () => clock });
 });
 
 test('GET plan: null before any save', async () => {
@@ -301,7 +324,11 @@ test('status: shape, money() everywhere, and review count over the last 30 days'
   expect(b.totals.budgeted.formatted).toBe('1800.00');
   expect(b.lines.find((l: any) => l.categoryId === 'groc').spent).toEqual({ amount: 20000, formatted: '200.00' });
   expect(b.lines.some((l: any) => l.categoryId === 'biz')).toBe(false);
-  expect(b.events).toContainEqual({ id: 'review:2026-11-20', kind: 'review', count: 1 });
+  const rid = `review:${createHash('sha256').update('rv').digest('hex').slice(0, 12)}`;
+  expect(b.events).toContainEqual({ id: rid, kind: 'review', count: 1 });
+  clock = new Date('2026-11-21T09:00:00Z'); // same unreviewed rows the next day: same id, no new alert
+  const again = await (await get('/status')).json() as any;
+  expect(again.events).toContainEqual({ id: rid, kind: 'review', count: 1 });
   const q = store.txQueries.find(x => x.tag === 'review')!;
   expect(q).toMatchObject({ from: '2026-10-21', to: '2026-11-20' });
 });
@@ -380,4 +407,137 @@ test('propose: a real failure reading the previous month is not hidden as zero',
   savePlan();
   store.failPrev = 'connection lost';
   expect((await get('/propose?month=2026-11')).status).toBe(500);
+});
+
+const savePlanOf = (p: PlanInput) => files.savePlan(p as never, { by: 't', why: 't' }, new Date());
+const statusOf = async (path = '/status') => (await (await get(path)).json()) as any;
+
+test('C1: apply December, then November is limited to what December left', async () => {
+  savePlan();
+  const dec = await (await get('/propose?month=2026-12')).json() as any;
+  expect((await post('/apply', { month: '2026-12', proposalId: dec.proposal.proposalId,
+    amounts: { rent: 2800, groc: 1000 }, approvedBy: 's' })).status).toBe(200);
+  expect(store.snaps.get('2026-12')!.toBudget).toBe(120000);
+
+  const nov = await (await get('/propose?month=2026-11')).json() as any;
+  expect(nov.proposal.available).toEqual({ amount: 120000, formatted: '1200.00' });
+  expect(nov.proposal.lines.find((l: any) => l.categoryId === 'rent').propose.amount).toBe(120000);
+  const over = await post('/apply', { month: '2026-11', proposalId: nov.proposal.proposalId, amounts: { rent: 1200.01 }, approvedBy: 's' });
+  expect(over.status).toBe(400);
+  expect(await errCode(over)).toBe('over_available');
+  expect((await post('/apply', { month: '2026-11', proposalId: nov.proposal.proposalId, amounts: { rent: 1200 }, approvedBy: 's' })).status).toBe(200);
+  expect(store.snaps.get('2026-12')!.toBudget).toBe(0); // November's gift came out of December's carry-over
+  expect(((await (await get('/propose?month=2026-11')).json()) as any).proposal.available.amount).toBe(0);
+});
+
+test('C1: funding a later month after propose makes the proposal stale', async () => {
+  savePlan();
+  const id = await proposalId();
+  store.snaps.set('2026-12', { ...snapshot('2026-12'), toBudget: 400000 }); // December changed since propose
+  const r = await post('/apply', { month: '2026-11', proposalId: id, amounts: { rent: 10 }, approvedBy: 's' });
+  expect(r.status).toBe(409);
+  expect(await errCode(r)).toBe('stale_proposal');
+  expect(store.writes).toEqual([]);
+});
+
+test('C1: later months are scanned only up to 12 months ahead', async () => {
+  savePlan();
+  store.months = ['2026-11', '2027-11', '2027-12'];
+  store.snaps.set('2027-12', { ...snapshot('2027-12'), toBudget: 5 });
+  expect(((await (await get('/propose?month=2026-11')).json()) as any).proposal.available.amount).toBe(500000);
+  store.snaps.set('2027-11', { ...snapshot('2027-11'), toBudget: 7 });
+  expect(((await (await get('/propose?month=2026-11')).json()) as any).proposal.available.amount).toBe(7);
+});
+
+test('I1: a manual edit visible only after sync makes apply return stale_proposal', async () => {
+  savePlan();
+  const id = await proposalId();
+  store.onSync = () => { store.snaps.get('2026-11')!.toBudget += 100; };
+  const r = await post('/apply', { month: '2026-11', proposalId: id, amounts: { rent: 10 }, approvedBy: 's' });
+  expect(r.status).toBe(409);
+  expect(await errCode(r)).toBe('stale_proposal');
+  expect(store.writes).toEqual([]);
+});
+
+test('I1: propose, apply and move sync first; a sync failure is 503 sync_failed and writes nothing', async () => {
+  savePlan();
+  const id = await proposalId();
+  const before = store.syncs;
+  await get('/propose');
+  expect(store.syncs).toBe(before + 1);
+  store.failSync = true;
+  const p = await get('/propose');
+  expect(p.status).toBe(503);
+  expect(await errCode(p)).toBe('sync_failed');
+  const a = await post('/apply', { month: '2026-11', proposalId: id, amounts: { rent: 10 }, approvedBy: 's' });
+  expect(a.status).toBe(503);
+  expect(await errCode(a)).toBe('sync_failed');
+  const m = await post('/move', { month: '2026-11', from: 'fun', to: 'groc', amount: 1, approvedBy: 's' });
+  expect(m.status).toBe(503);
+  expect(await errCode(m)).toBe('sync_failed');
+  expect(store.writes).toEqual([]);
+  expect(existsSync(join(dir, 'budget', 'writes.jsonl'))).toBe(false);
+  store.failSync = false;
+  expect((await post('/move', { month: '2026-11', from: 'fun', to: 'groc', amount: 1, approvedBy: 's' })).status).toBe(200);
+});
+
+test('I2: a salary row from the last day of the previous month still alerts after the month rolls over', async () => {
+  savePlan();
+  clock = new Date('2026-12-02T09:00:00Z');
+  store.rows = [row({ id: 'nov30', date: '2026-11-30' })];
+  const b = await statusOf();
+  expect(b.month).toBe('2026-12');
+  expect(b.events.map((e: any) => e.id)).toContain('income:nov30');
+  // and when a past month is asked for, today's window rows are still reported
+  expect((await statusOf('/status?month=2026-11')).events.map((e: any) => e.id)).toContain('income:nov30');
+});
+
+test('I2: a transfer due across the month boundary is reported missing from the next month', async () => {
+  savePlanOf({ ...plan, incomeSources: [{ name: 'Alimony', payee: 'Inbal', expectedAmount: 5000, expectedDay: 29, fixedTransfer: true }] });
+  clock = new Date('2026-12-05T09:00:00Z');
+  const ids = async () => (await statusOf()).events.map((e: any) => e.id) as string[];
+  expect(await ids()).toContain('transfer:2026-11');
+  store.rows = [row({ id: 'alim', date: '2026-11-29', payee: 'Inbal', importedPayee: 'Inbal' })];
+  expect(await ids()).not.toContain('transfer:2026-11');
+});
+
+test('I3: deposits into off-budget accounts do not count as income landed', async () => {
+  savePlan();
+  store.rows = [row({ id: 'sav', account: 'off' })];
+  const b = await (await get('/propose')).json() as any;
+  expect(b.landed).toEqual([]);
+  expect((await statusOf()).events.map((e: any) => e.id)).not.toContain('income:sav');
+});
+
+test('I3: an income source with an account only matches rows in that account', async () => {
+  savePlanOf({ ...plan, incomeSources: [{ name: 'Salary', payee: 'Employer', expectedAmount: 15000, expectedDay: 10, account: 'hap' }] });
+  store.rows = [row({ id: 'elsewhere', account: 'a' })];
+  expect(((await (await get('/propose')).json()) as any).landed).toEqual([]);
+  store.rows = [row({ id: 'there', account: 'hap' })];
+  const b = await (await get('/propose')).json() as any;
+  expect(b.landed.map((l: any) => l.source)).toEqual(['Salary']);
+});
+
+test('M2: an unconfirmed write is journaled as unconfirmed, then the error surfaces; other failures stay unjournaled', async () => {
+  savePlan();
+  store.failWrite = 'unconfirmed';
+  const a = await post('/apply', { month: '2026-11', proposalId: await proposalId(), amounts: { groc: 10 }, approvedBy: 'shai' });
+  expect(a.status).toBe(500);
+  const m = await post('/move', { month: '2026-11', from: 'fun', to: 'groc', amount: 1, approvedBy: 'shai' });
+  expect(m.status).toBe(500);
+  const lines = readFileSync(join(dir, 'budget', 'writes.jsonl'), 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  expect(lines).toHaveLength(2);
+  expect(lines[0]).toMatchObject({ op: 'apply', month: '2026-11', approvedBy: 'shai', outcome: 'unconfirmed', amounts: { groc: 101000 } });
+  expect(lines[1]).toMatchObject({ op: 'move', month: '2026-11', from: 'fun', to: 'groc', amount: 100, outcome: 'unconfirmed' });
+});
+
+test('M3: a visible category that is not in the plan cannot be a move source', async () => {
+  savePlan();
+  const r = await post('/move', { month: '2026-11', from: 'misc', to: 'groc', amount: 1, approvedBy: 's' });
+  expect(r.status).toBe(400);
+  const err = ((await r.json()) as { error: { code: string; message: string } }).error;
+  expect(err.code).toBe('protected_source');
+  expect(err.message).toContain('not in the plan');
+  // any visible expense category is still a valid destination
+  expect((await post('/move', { month: '2026-11', from: 'fun', to: 'misc', amount: 1, approvedBy: 's' })).status).toBe(200);
 });

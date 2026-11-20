@@ -17,7 +17,7 @@ import { exclusionResolver } from './exclusions.ts';
 import { money } from './format.ts';
 
 export type ApiStore = Pick<ActualStore, 'sync' | 'categories' | 'transactions' | 'transaction' | 'update' | 'rules'
-  | 'replaceRule' | 'deleteRule' | 'spend' | 'income' | 'budgetMonth' | 'setBudgeted'>;
+  | 'replaceRule' | 'deleteRule' | 'spend' | 'income' | 'budgetMonth' | 'budgetMonths' | 'setBudgeted' | 'accounts'>;
 
 export type ApiStatus = { lastSyncAt?: string; lastRunAt?: string; lastRunOk?: boolean };
 

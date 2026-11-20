@@ -21,6 +21,8 @@ const incomeSourceSchema = z.object({
   expectedAmount: z.number().nonnegative(),
   expectedDay: z.number().int().min(1).max(31),
   fixedTransfer: z.boolean().optional(),
+  /** Actual account id. When set, only deposits in that account count as this source landing. */
+  account: z.string().min(1).optional(),
 });
 
 const thresholdsSchema = z.object({

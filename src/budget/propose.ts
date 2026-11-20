@@ -49,14 +49,22 @@ export function plannedAmount(c: PlanCategory, cat: CategoryMonth, month: string
 
 const cmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
-/** sha256 of month + toBudget + every category's budgeted, sorted by id; first 12 hex chars. */
-export function proposalId(snap: MonthSnapshot): string {
+/**
+ * What can still be given to `snap.month` without double-spending. In Actual's envelope model a later month's
+ * To budget includes this month's leftover, so money already given to a later month is no longer free here.
+ * `later` holds the toBudget of every later month with budget data, in month order.
+ */
+export const availableFor = (snap: MonthSnapshot, later: number[] = []): number => Math.min(snap.toBudget, ...later);
+
+/** sha256 of month + toBudget + every later month's toBudget + every category's budgeted, sorted by id; first 12 hex chars. */
+export function proposalId(snap: MonthSnapshot, later: number[] = []): string {
   const cats = [...snap.categories].sort((a, b) => cmp(a.id, b.id))
     .map((c) => `${c.id}:${c.budgeted}`);
-  return createHash('sha256').update([snap.month, snap.toBudget, ...cats].join('|')).digest('hex').slice(0, 12);
+  return createHash('sha256').update([snap.month, snap.toBudget, `later:${later.join(',')}`, ...cats].join('|'))
+    .digest('hex').slice(0, 12);
 }
 
-export function propose(plan: Plan, snap: MonthSnapshot): Proposal {
+export function propose(plan: Plan, snap: MonthSnapshot, later: number[] = []): Proposal {
   checkPlan(plan, snap);
   const byId = new Map(snap.categories.map((c) => [c.id, c]));
   const entries = plan.categories
@@ -64,7 +72,8 @@ export function propose(plan: Plan, snap: MonthSnapshot): Proposal {
     .map((c) => ({ c, cat: byId.get(c.categoryId)! }))
     .sort((x, y) => x.c.priority - y.c.priority || cmp(x.cat.label, y.cat.label));
 
-  let remaining = snap.toBudget;
+  const available = availableFor(snap, later);
+  let remaining = available;
   const lines: ProposalLine[] = entries.map(({ c, cat }) => {
     const planned = plannedAmount(c, cat, snap.month);
     const need = Math.max(0, planned - cat.budgeted);
@@ -76,7 +85,7 @@ export function propose(plan: Plan, snap: MonthSnapshot): Proposal {
     };
   });
   return {
-    month: snap.month, proposalId: proposalId(snap), available: snap.toBudget,
+    month: snap.month, proposalId: proposalId(snap, later), available,
     proposed: lines.reduce((s, l) => s + l.propose, 0), remaining, lines,
   };
 }
