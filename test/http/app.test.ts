@@ -6,6 +6,7 @@ import { parse } from 'yaml';
 import type { CuratorRow, CuratorRule, NewCuratorRule, ReportRow } from '../../src/actual/types.ts';
 import type { CategoryOption } from '../../src/classifier/types.ts';
 import type { RunSummary } from '../../src/curator/run.ts';
+import { BudgetFiles } from '../../src/budget/plan-store.ts';
 import { type ApiStore, createApp } from '../../src/http/app.ts';
 import { DecisionLog } from '../../src/log.ts';
 import { parseVocabulary } from '../../src/vocabulary.ts';
@@ -60,6 +61,10 @@ class FakeStore implements ApiStore {
   excludes: (readonly string[] | undefined)[] = [];
   async spend(q: { exclude?: readonly string[] }) { this.excludes.push(q.exclude); return this.spendRows; }
   async income(q: { exclude?: readonly string[] }) { this.excludes.push(q.exclude); return [{ key: 'sal', label: 'Income / Salary', amount: 1500000 }]; }
+  async budgetMonth(month: string) { return { month, toBudget: 0, categories: [] }; }
+  async budgetMonths() { return [] as string[]; }
+  async accounts() { return [] as { id: string; name: string; offbudget: boolean }[]; }
+  async setBudgeted() {}
 }
 
 const summary: RunSummary = { synced: true, ok: true, seen: 2, ruleHits: 1, classified: 1, review: 0, settled: 0,
@@ -76,6 +81,7 @@ beforeEach(() => {
   app = createApp({ store, log, vocab, cfg: { token: 'secret', currency: 'ILS' }, classifierName: 'fake',
     runNow: async () => summary, versions: { curator: '0.1.0', actualApi: '26.10.0', server: '26.10.0' },
     status: () => ({ lastSyncAt: '2026-10-16T10:00:00Z', lastRunAt: '2026-10-16T10:00:00Z', lastRunOk: true }),
+    budget: new BudgetFiles(mkdtempSync(join(tmpdir(), 'curator-budget-'))),
     now: () => new Date('2026-10-16T12:00:00Z') });
 });
 
@@ -189,7 +195,8 @@ test('reports pass the configured exclusions to the store as ids and name them i
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   const ex = createApp({ store, log, vocab, cfg: { token: 'secret', currency: 'ILS', reportExclude: ['Wants / Gifts', 'dining', 'Nope / Typo'] },
     classifierName: 'fake', runNow: async () => summary, versions: { curator: '0', actualApi: '0', server: '0' },
-    status: () => ({}), now: () => new Date('2026-10-16T12:00:00Z') });
+    status: () => ({}), budget: new BudgetFiles(mkdtempSync(join(tmpdir(), 'curator-budget-'))),
+    now: () => new Date('2026-10-16T12:00:00Z') });
   const spend = await (await ex.request('/v1/report/spend?from=2026-10-01&to=2026-10-31', { headers: auth })).json();
   expect(spend.excluded).toEqual(['Wants / Gifts', 'Wants / Dining']);
   const income = await (await ex.request('/v1/report/income?from=2026-10-01&to=2026-10-31', { headers: auth })).json();

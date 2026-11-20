@@ -8,6 +8,7 @@ import { createClassifier } from './classifier/index.ts';
 import { loadConfig } from './config.ts';
 import { curate } from './curator/run.ts';
 import { accessVerifier } from './http/access.ts';
+import { BudgetFiles } from './budget/plan-store.ts';
 import { createApp } from './http/app.ts';
 import { exclusionResolver } from './http/exclusions.ts';
 import { createMoneyPage } from './http/money.ts';
@@ -49,7 +50,7 @@ async function main() {
   }, { intervalMinutes: cfg.runIntervalMinutes, notifier });
 
   const app = createApp({ store, log, vocab, cfg, classifierName: classifier.name, runNow: scheduler.runNow,
-    status: scheduler.status, versions });
+    status: scheduler.status, versions, budget: new BudgetFiles(cfg.dataDir) });
   const page = createMoneyPage({ store, exclusions: exclusionResolver(store, cfg.reportExclude), watch: cfg.moneyWatch,
     pending: async () => (await store.transactions({ from: '1970-01-01', to: '9999-12-31', tag: 'review', limit: 10_000 })).length,
     ...(cfg.access ? { verify: accessVerifier(cfg.access) } : {}) });

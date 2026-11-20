@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.0 — a monthly envelope budget
+
+- Seven routes under `/v1/budget` run the monthly envelope budget: `GET`/`PUT /plan`, `GET /propose`,
+  `POST /apply`, `POST /move`, `GET /status` and `POST /status/ack`. Every number is computed in
+  code (what to fund, what is on pace, what to move); an assistant only quotes and applies them.
+- Requests take shekels (at most 2 decimals). Responses give `{amount, formatted}`, with `amount`
+  in agorot. The plan itself is kept in shekels.
+- The plan lives in `$DATA_DIR/budget/` (`plan.json`, `plan-history.jsonl`, `writes.jsonl`,
+  `state.json`, each written atomically). It is not seeded: with no plan saved, propose and status
+  answer 409 `no_plan`. A plan category that is missing or hidden in Actual is 409 `stale_plan`.
+- Past months are read-only (400 `past_month`). Excluded categories never appear in a proposal, in
+  status or in suggested moves. A protected category is never a move source, and neither is a
+  category that is not in the plan.
+- A proposal never funds more than the lowest To budget of that month and every later month Actual
+  has data for, because Actual carries a month's leftover into the next. Apply checks the same
+  limit, and a change in any of those months makes the proposal stale (409 `stale_proposal`).
+- Status gives pace per category, suggested moves and events: income landed (on-budget accounts,
+  and the source's account if the plan names one), a fixed transfer that did not arrive, a
+  category on `watch` or `off`, and rows waiting for review. Events repeat until acked with
+  `POST /status/ack`. Carried-over balance is not counted as overspending.
+- Propose, apply and move sync with the Actual server first; if that fails they answer 503
+  `sync_failed` and write nothing. A write Actual could not confirm is journaled as `unconfirmed`.
+
 ## 0.1.6 — a readable money page
 
 - `GET /money`: one phone-sized page, Hebrew (right to left, the default) or English, that says what

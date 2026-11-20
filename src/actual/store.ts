@@ -1,4 +1,5 @@
 import * as api from '@actual-app/api';
+import type { MonthSnapshot } from '../budget/types.ts';
 import type { CategoryOption } from '../classifier/types.ts';
 import { parseTags } from '../notes.ts';
 import type { CuratorRow, CuratorRule, NewCuratorRule, ReportRow, RuleAction, RuleCondition } from './types.ts';
@@ -40,6 +41,14 @@ export class StaleRowError extends Error {
   constructor(id: string) {
     super(`transaction ${id} changed since it was read`);
     this.name = 'StaleRowError';
+  }
+}
+
+/** `setBudgeted` could not read its writes back in time; the write may or may not have landed. */
+export class BudgetWriteUnconfirmedError extends Error {
+  constructor(month: string) {
+    super(`Actual did not apply the budgeted amounts for ${month}`);
+    this.name = 'BudgetWriteUnconfirmedError';
   }
 }
 
@@ -94,10 +103,54 @@ export class ActualStore {
       if (g.hidden && !opts.includeHidden) continue;
       for (const c of g.categories ?? []) {
         if (c.hidden && !opts.includeHidden) continue;
-        out.push({ id: c.id as string, label: `${g.name} / ${c.name}`, isIncome: Boolean(g.is_income) });
+        out.push({ id: c.id as string, label: categoryLabel(g, c), isIncome: Boolean(g.is_income) });
       }
     }
     return out;
+  }
+
+  /** Every month (YYYY-MM, ascending) Actual has budget data for. */
+  async budgetMonths(): Promise<string[]> {
+    return [...(await api.getBudgetMonths())].sort();
+  }
+
+  /** One month's envelope snapshot, every amount in minor units. Hidden and income categories are included, flagged. */
+  async budgetMonth(month: string): Promise<MonthSnapshot> {
+    const m = await api.getBudgetMonth(month);
+    const categories: MonthSnapshot['categories'] = [];
+    for (const g of m.categoryGroups as (Raw & { categories?: Raw[] })[]) {
+      for (const c of g.categories ?? []) {
+        categories.push({
+          id: c.id as string, label: categoryLabel(g, c),
+          hidden: Boolean(c.hidden || g.hidden), isIncome: Boolean(g.is_income),
+          budgeted: (c.budgeted as number) ?? 0, spent: (c.spent as number) ?? 0, balance: (c.balance as number) ?? 0,
+        });
+      }
+    }
+    return { month, toBudget: m.toBudget, categories };
+  }
+
+  /**
+   * Sets ABSOLUTE budgeted amounts (minor units) for a month in one batch.
+   * Like `update`, the writes are read back, since the api can resolve before they are applied.
+   */
+  async setBudgeted(month: string, amounts: Record<string, number>): Promise<void> {
+    await this.locked(async () => {
+      const known = new Set((await this.budgetMonth(month)).categories.map(c => c.id));
+      const unknown = Object.keys(amounts).filter(id => !known.has(id));
+      if (unknown.length) throw new Error(`unknown category id(s): ${unknown.join(', ')}`);
+      await api.batchBudgetUpdates(async () => {
+        for (const [id, amount] of Object.entries(amounts)) await api.setBudgetAmount(month, id, amount);
+      });
+      const applied = async () => {
+        const snap = await this.budgetMonth(month);
+        return Object.entries(amounts).every(([id, a]) => snap.categories.find(c => c.id === id)?.budgeted === a);
+      };
+      for (let waited = 0; !(await applied()); waited += 25) {
+        if (waited >= 2000) throw new BudgetWriteUnconfirmedError(month);
+        await new Promise(r => setTimeout(r, 25));
+      }
+    });
   }
 
   async accounts(): Promise<{ id: string; name: string; offbudget: boolean }[]> {
@@ -271,6 +324,9 @@ export class ActualStore {
     return [...totals.values()].sort((a, b) => b.amount - a.amount);
   }
 }
+
+/** "Group / Name", the label every category shows under. */
+function categoryLabel(g: Raw, c: Raw): string { return `${g.name} / ${c.name}`; }
 
 /**
  * Inclusive date range. Actual's AQL keeps only one operator of `{ date: { $gte, $lte } }` and

@@ -24,6 +24,94 @@ components:
     Error:
       type: object
       properties: { error: { type: object, properties: { code: { type: string }, message: { type: string } } } }
+    BudgetStatusKind: { type: string, enum: [ok, watch, off] }
+    PaceLine:
+      type: object
+      description: One plan category's pace for the month. Excluded categories never appear. Every amount is Money (agorot + formatted); `spent` is positive.
+      properties:
+        categoryId: { type: string }
+        label: { type: string }
+        kind: { type: string, enum: [fixed, variable, setaside] }
+        budgeted: { $ref: "#/components/schemas/Money" }
+        spent: { $ref: "#/components/schemas/Money", description: "Positive; refunds reduce it" }
+        balance: { $ref: "#/components/schemas/Money", description: "Includes the balance carried in from earlier months" }
+        expectedByToday: { $ref: "#/components/schemas/Money", description: "budgeted * day / days in month (0 for a future month, the full budget for a past month)" }
+        projected: { $ref: "#/components/schemas/Money", description: "Variable: spent so far plus the rest of the budget at plan pace. Fixed and setaside: just spent" }
+        status:
+          type: string
+          enum: [ok, watch, off]
+          description: |
+            Variable: excess = (spent - expectedByToday) - max(0, carry-in), where carry-in = balance - budgeted + spent.
+            `off` when balance < 0, or from day 7 when excess >= offPct% of budgeted. `watch` when excess > watchPct% of
+            expectedByToday and >= watchMin shekels. Setaside: `watch` from day 20 while budgeted is below the planned amount.
+    Move:
+      type: object
+      description: A suggested move of budget between two categories (status only; apply it with POST /v1/budget/move).
+      properties:
+        from: { type: string, description: "Source categoryId (a plan category that is neither excluded nor protected)" }
+        fromLabel: { type: string }
+        to: { type: string, description: "Destination categoryId (an `off` line)" }
+        toLabel: { type: string }
+        amount: { $ref: "#/components/schemas/Money", description: "Rounded up to a whole 10 shekels, never above the source's slack" }
+    ProposalLine:
+      type: object
+      properties:
+        categoryId: { type: string }
+        label: { type: string }
+        kind: { type: string, enum: [fixed, variable, setaside] }
+        priority: { type: integer, description: "Lower is funded first" }
+        planned: { $ref: "#/components/schemas/Money", description: "What the plan wants this category to hold for the month" }
+        budgeted: { $ref: "#/components/schemas/Money", description: "Already budgeted in Actual" }
+        propose: { $ref: "#/components/schemas/Money", description: "What to add now (never more than is available)" }
+        unfunded: { $ref: "#/components/schemas/Money", description: "Still missing after propose" }
+    Proposal:
+      type: object
+      properties:
+        month: { type: string, example: "2026-11" }
+        proposalId: { type: string, description: "12 hex chars. Covers the month's To budget, every later month's To budget and every budgeted amount; pass it back to apply. A change to any of them makes it stale." }
+        available: { $ref: "#/components/schemas/Money", description: "Minimum To budget from this month through the last month Actual has data for (at most 12 months ahead): money already given to a later month is not available again" }
+        proposed: { $ref: "#/components/schemas/Money", description: "Sum of the lines' propose" }
+        remaining: { $ref: "#/components/schemas/Money", description: "available - proposed" }
+        lines: { type: array, items: { $ref: "#/components/schemas/ProposalLine" } }
+    BudgetEvent:
+      description: |
+        An alert the status route returns until it is acknowledged (POST /v1/budget/status/ack). `id` is stable: the same
+        condition always has the same id. Discriminated by `kind`.
+      oneOf:
+        - type: object
+          description: "A deposit matching an income source (payee text, and the account when the source names one) landed in an on-budget account. Taken from the last 35 days plus the queried month. id = income:<transactionId>"
+          required: [id, kind, source, amount, date, transactionId]
+          properties:
+            id: { type: string }
+            kind: { const: income }
+            source: { type: string, description: "Income source name from the plan" }
+            amount: { $ref: "#/components/schemas/Money" }
+            date: { type: string, format: date }
+            transactionId: { type: string }
+        - type: object
+          description: "A fixedTransfer income source had no matching row by expectedDay + 3 (counted across the month boundary). id = transfer:<YYYY-MM> of the month it was due. For the current month the previous month is checked as well."
+          required: [id, kind, source, expectedDay]
+          properties:
+            id: { type: string }
+            kind: { const: transfer_missing }
+            source: { type: string }
+            expectedDay: { type: integer }
+        - type: object
+          description: "A category went `watch` or `off`. id = pace:<YYYY-MM>:<categoryId>:<status>, so watch to off is a new event."
+          required: [id, kind, categoryId, label, status]
+          properties:
+            id: { type: string }
+            kind: { const: pace }
+            categoryId: { type: string }
+            label: { type: string }
+            status: { type: string, enum: [watch, off] }
+        - type: object
+          description: "Rows tagged #review in the last 30 days. id = review:<first 12 hex of sha256 of the sorted row ids>: the same unreviewed rows keep the same id (no daily re-alert), new rows change it."
+          required: [id, kind, count]
+          properties:
+            id: { type: string }
+            kind: { const: review }
+            count: { type: integer }
     Transaction:
       type: object
       properties:
@@ -223,3 +311,128 @@ paths:
       parameters: [{ name: since, in: query, schema: { type: string, format: date-time } }]
       responses:
         "200": { description: OK }
+  /v1/budget/plan:
+    get:
+      summary: The saved budget plan, or null when none is saved. Plan amounts are in SHEKELS (not minor units). An income source may carry an optional `account` (Actual account id) so only deposits in that account count
+      responses:
+        "200": { description: "OK: {plan: Plan | null}" }
+    put:
+      summary: Save the plan (shekels, at most 2 decimals). Records by/why in the plan history. Errors 400 bad_request, 409 stale_plan
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [plan, by, why]
+              properties: { plan: { type: object }, by: { type: string }, why: { type: string } }
+      responses:
+        "200": { description: "OK: {plan}" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { description: "stale_plan: a plan category is missing or hidden in Actual", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v1/budget/propose:
+    get:
+      summary: |
+        Deterministic funding proposal for a month (default current). Syncs with the Actual server first. Amounts in
+        the response are Money objects {amount (agorot), formatted}. Errors 400 past_month / bad_request, 409 no_plan /
+        stale_plan, 503 sync_failed
+      parameters: [{ name: month, in: query, schema: { type: string, example: "2026-11" } }]
+      responses:
+        "200":
+          description: "OK: {proposal, landed, expected, excludedSpentLastMonth}. landed and expected are for the queried month only"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  proposal: { $ref: "#/components/schemas/Proposal" }
+                  landed:
+                    type: array
+                    items: { type: object, properties: { source: { type: string }, amount: { $ref: "#/components/schemas/Money" }, date: { type: string, format: date } } }
+                  expected:
+                    type: array
+                    description: Income sources with no deposit yet this month
+                    items: { type: object, properties: { source: { type: string }, expectedDay: { type: integer } } }
+                  excludedSpentLastMonth: { $ref: "#/components/schemas/Money" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/budget/apply:
+    post:
+      summary: |
+        Add the given SHEKEL amounts (request body) on top of each category's budgeted value; the response uses Money objects.
+        Syncs first. Errors 400 bad_request / past_month / bad_category / over_available (the sum exceeds `available`, which
+        covers later months' To budget), 409 stale_proposal / no_plan / stale_plan, 503 sync_failed. A write Actual could not
+        confirm returns 500 and is journaled with outcome "unconfirmed"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [month, proposalId, amounts, approvedBy]
+              properties:
+                month: { type: string, example: "2026-11" }
+                proposalId: { type: string }
+                amounts: { type: object, additionalProperties: { type: number, minimum: 0 }, description: "categoryId to shekels to add" }
+                approvedBy: { type: string }
+      responses:
+        "200": { description: "OK: {month, applied:[{categoryId,label,added (Money),budgeted (Money)}], toBudget (Money, the month's To budget after the write)}" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/budget/move:
+    post:
+      summary: |
+        Move SHEKELS (request body) between categories; the response uses Money objects. Syncs first. `from` must be a plan
+        category that is neither excluded nor protected; `to` may be any visible expense category. Errors 400 bad_request /
+        past_month / bad_category (unknown, hidden or income category, or `to` excluded) / protected_source (`from` is
+        protected, excluded or not in the plan) / insufficient_balance, 409 no_plan / stale_plan, 503 sync_failed. A write
+        Actual could not confirm returns 500 and is journaled with outcome "unconfirmed"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [month, from, to, amount, approvedBy]
+              properties:
+                month: { type: string, example: "2026-11" }
+                from: { type: string }
+                to: { type: string }
+                amount: { type: number, exclusiveMinimum: 0 }
+                approvedBy: { type: string }
+      responses:
+        "200": { description: "OK: {month, from:{id,label,budgeted (Money),balance (Money)}, to:{...}} with the new values" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/budget/status:
+    get:
+      summary: |
+        Pace per category, suggested moves (empty for a past month) and unacked events. Syncs first (a sync failure is a
+        500). Amounts are Money objects {amount (agorot), formatted}. Errors 400 bad_request, 409 no_plan / stale_plan
+      parameters: [{ name: month, in: query, schema: { type: string, example: "2026-11" } }]
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  month: { type: string }
+                  today: { type: string, format: date, description: Asia/Jerusalem }
+                  totals: { type: object, properties: { budgeted: { $ref: "#/components/schemas/Money" }, spent: { $ref: "#/components/schemas/Money" }, balance: { $ref: "#/components/schemas/Money" } } }
+                  lines: { type: array, items: { $ref: "#/components/schemas/PaceLine" } }
+                  moves: { type: array, items: { $ref: "#/components/schemas/Move" } }
+                  events: { type: array, items: { $ref: "#/components/schemas/BudgetEvent" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/budget/status/ack:
+    post:
+      summary: Acknowledge events by id so status stops returning them
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, required: [ids], properties: { ids: { type: array, items: { type: string } } } }
+      responses:
+        "200": { description: "OK: {acked: n}" }
+        "400": { $ref: "#/components/responses/Error" }

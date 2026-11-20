@@ -8,12 +8,16 @@ import type { RunSummary } from '../curator/run.ts';
 import type { DecisionLog } from '../log.ts';
 import { hasTag, parseTags, withTags } from '../notes.ts';
 import type { Vocabulary } from '../vocabulary.ts';
+import { PlanError } from '../budget/propose.ts';
+import type { BudgetFiles } from '../budget/plan-store.ts';
+import { registerBudgetRoutes } from './budget.ts';
+import { ApiError } from './errors.ts';
 import { bearer } from './auth.ts';
 import { exclusionResolver } from './exclusions.ts';
 import { money } from './format.ts';
 
 export type ApiStore = Pick<ActualStore, 'sync' | 'categories' | 'transactions' | 'transaction' | 'update' | 'rules'
-  | 'replaceRule' | 'deleteRule' | 'spend' | 'income'>;
+  | 'replaceRule' | 'deleteRule' | 'spend' | 'income' | 'budgetMonth' | 'budgetMonths' | 'setBudgeted' | 'accounts'>;
 
 export type ApiStatus = { lastSyncAt?: string; lastRunAt?: string; lastRunOk?: boolean };
 
@@ -26,18 +30,9 @@ export type ApiDeps = {
   runNow: () => Promise<RunSummary>;
   status: () => ApiStatus;
   versions: { curator: string; actualApi: string; server: string };
+  budget: BudgetFiles;
   now?: () => Date;
 };
-
-class ApiError extends Error {
-  readonly status: 400 | 404;
-  readonly code: string;
-  constructor(status: 400 | 404, code: string, message: string) {
-    super(message);
-    this.status = status;
-    this.code = code;
-  }
-}
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'expected YYYY-MM-DD');
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -50,6 +45,7 @@ export function createApp(deps: ApiDeps): Hono {
 
   app.onError((err, c) => {
     if (err instanceof ApiError) return c.json({ error: { code: err.code, message: err.message } }, err.status);
+    if (err instanceof PlanError) return c.json({ error: { code: err.code, message: err.message } }, 409);
     if (err instanceof StaleRowError) return c.json({ error: { code: 'conflict', message: `${err.message}; read it again` } }, 409);
     if (err instanceof z.ZodError) {
       return c.json({ error: { code: 'bad_request', message: err.issues.map(i => `${i.path.join('.') || 'body'}: ${i.message}`).join('; ') } }, 400);
@@ -242,6 +238,8 @@ export function createApp(deps: ApiDeps): Hono {
     const since = z.string().min(4).default(new Date(now().getTime() - 864e5).toISOString()).parse(c.req.query('since'));
     return c.json({ decisions: await log.since(since) });
   });
+
+  registerBudgetRoutes(app, deps, now);
 
   return app;
 }
