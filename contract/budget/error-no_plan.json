@@ -1,0 +1,10 @@
+{
+  "route": "GET /v1/budget/propose",
+  "status": 409,
+  "body": {
+    "error": {
+      "code": "no_plan",
+      "message": "No budget plan saved yet; PUT /v1/budget/plan first"
+    }
+  }
+}

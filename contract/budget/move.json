@@ -1,0 +1,31 @@
+{
+  "route": "POST /v1/budget/move",
+  "status": 200,
+  "body": {
+    "month": "2026-11",
+    "from": {
+      "id": "fun",
+      "label": "Wants / Fun",
+      "budgeted": {
+        "amount": 40000,
+        "formatted": "400.00"
+      },
+      "balance": {
+        "amount": 40000,
+        "formatted": "400.00"
+      }
+    },
+    "to": {
+      "id": "groc",
+      "label": "Needs / Groceries",
+      "budgeted": {
+        "amount": 110000,
+        "formatted": "1100.00"
+      },
+      "balance": {
+        "amount": 90000,
+        "formatted": "900.00"
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "route": "POST /v1/budget/apply",
+  "status": 409,
+  "body": {
+    "error": {
+      "code": "stale_proposal",
+      "message": "To budget or a budgeted amount changed since the proposal; propose again"
+    }
+  }
+}

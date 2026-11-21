@@ -1,0 +1,10 @@
+{
+  "route": "POST /v1/budget/apply",
+  "status": 400,
+  "body": {
+    "error": {
+      "code": "over_available",
+      "message": "adds 5001.00 but only 5000.00 is available"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "route": "POST /v1/budget/status/ack",
+  "status": 200,
+  "body": {
+    "acked": 1
+  }
+}

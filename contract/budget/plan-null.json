@@ -1,0 +1,7 @@
+{
+  "route": "GET /v1/budget/plan",
+  "status": 200,
+  "body": {
+    "plan": null
+  }
+}
