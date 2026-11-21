@@ -204,3 +204,11 @@ describe('fundingShortfall (the apply check)', () => {
     expect(fundingShortfall(s, [5000000], [{ cat: food, added: 1000001 }])).toEqual({ now: 1, later: 0 });
   });
 });
+
+describe('propose covers an overspend beyond the plan (Kvish6 planned 55, spent 127)', () => {
+  it('needs what brings the line back to zero', () => {
+    const p = plan([{ categoryId: 'kv', kind: 'variable', priority: 1, amount: 55 }]);
+    const r = propose(p, snap(1000000, [cat('kv', { budgeted: 5500, spent: -12700, balance: -7200 })], '2026-11'), [1000000]);
+    expect(r.lines[0]).toMatchObject({ propose: 7200, covers: 7200, unfunded: 0 });
+  });
+});

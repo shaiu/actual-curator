@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2
+
+- A proposal now covers every overspent planned line back to zero from money that has no job yet,
+  even past the line's planned amount. The overspend is already gone; leaving it uncovered only
+  moves it into next month.
+- A move between lines is suggested only for what unassigned money cannot cover.
+- `/budget` explains its top numbers in one line each, and what red and amber mean.
+
 ## 0.3.1
 
 - `/budget`: each line is measured against what it held this month, money carried over from earlier

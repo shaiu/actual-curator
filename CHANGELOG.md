@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.2 — free money before moves
+
+- `propose`: `need = max(0, planned - budgeted, -balance)`. Measured 2026-11-21: Kvish6 planned 55,
+  spent 127, so `need` was 0 and its ₪72 overspend was left for December while ₪16,864 sat unassigned.
+- `suggestMoves(plan, lines, today, free)`: each off line's shortfall is taken from `free` (the
+  proposal's `available`) first; only the remainder becomes a move. `/status` passes it. The status
+  contract fixture now has `toBudget: 0`, so it still shows a move.
+- `/budget`: hint lines under "left" and "money without a job", and the colour legend.
+
 ## 0.3.1 — /budget reads carry-over
 
 - A line's bar and "spent X of Y" use `balance + spent` (what the envelope held this month), and the

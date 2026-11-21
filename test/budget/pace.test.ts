@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { planSchema, type CategoryMonth, type MonthSnapshot, type PlanInput } from '../../src/budget/types.ts';
 import { PlanError } from '../../src/budget/propose.ts';
-import { pace, suggestMoves } from '../../src/budget/pace.ts';
+import { pace, suggestMoves, type PaceLine } from '../../src/budget/pace.ts';
 
 const cat = (id: string, o: Partial<CategoryMonth> = {}): CategoryMonth => ({
   id, label: id, hidden: false, isIncome: false, budgeted: 0, spent: 0, balance: 0, ...o,
@@ -198,5 +198,25 @@ describe('suggestMoves', () => {
       { categoryId: 'w', label: 'w', kind: 'variable', budgeted: 100000, spent: 0, balance: 100000, expectedByToday: 50000, projected: 50000, status: 'watch' },
     ] as const;
     expect(suggestMoves(p, [...lines], today)).toEqual([]);
+  });
+});
+
+describe('suggestMoves with free money (2026-11-21: moves were offered beside ₪16,864 unassigned)', () => {
+  const p = planSchema.parse({ version: 1, incomeSources: [], categories: [
+    { categoryId: 'gas', kind: 'variable', priority: 2, amount: 1000 },
+    { categoryId: 'kv', kind: 'variable', priority: 2, amount: 55 },
+  ] });
+  const lines: PaceLine[] = [
+    { categoryId: 'gas', label: 'Gas', kind: 'variable', budgeted: 100000, spent: 10000, balance: 90000, expectedByToday: 70000, projected: 40000, status: 'ok' },
+    { categoryId: 'kv', label: 'Kvish6', kind: 'variable', budgeted: 5500, spent: 12700, balance: -7200, expectedByToday: 3850, projected: 12700, status: 'off' },
+  ];
+  it('free money covers the shortfall: no move', () => {
+    expect(suggestMoves(p, lines, '2026-11-21', 1686400)).toEqual([]);
+  });
+  it('only what free money cannot cover becomes a move', () => {
+    expect(suggestMoves(p, lines, '2026-11-21', 5000).map((m) => m.amount)).toEqual([3000]);
+  });
+  it('no free money behaves as before', () => {
+    expect(suggestMoves(p, lines, '2026-11-21').map((m) => m.amount)).toEqual([7200 + 800]);
   });
 });
