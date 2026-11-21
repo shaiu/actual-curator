@@ -100,3 +100,16 @@ test('suggested moves show only while no proposal gives money', () => {
   expect(renderBudget(view(lines, false), 'he')).toContain('<bdi>Gas ⛽</bdi> ← <bdi>Phone</bdi>');
   expect(renderBudget(view(lines, true), 'he')).not.toContain('היועץ עשוי להציע העברה');
 });
+
+test('categories outside the plan get their own section; excluded ones are collapsed apart', () => {
+  const v = view([line('Needs / Gas ⛽', 1855, 384, 1471)], false) as any;
+  v.status.unplanned = [{ categoryId: 'auto', label: 'Needs / 🚗 Auto maintenance', spent: mny(2922), balance: mny(-2922) }];
+  v.status.excluded = [{ categoryId: 'biz', label: "Needs / Inbal's Business Stuff", spent: mny(15766), balance: mny(-15766) }];
+  const html = renderBudget(v, 'en');
+  expect(html).toContain('Not in the plan');
+  expect(html).toContain('<bdi>🚗 Auto maintenance</bdi>');
+  expect(html).toContain('₪2,922 over');
+  expect(html).toMatch(/<details><summary>Left out by decision \(1\)<\/summary>/);
+  delete v.status.unplanned; delete v.status.excluded;
+  expect(renderBudget(v, 'en')).not.toContain('Not in the plan');
+});

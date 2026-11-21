@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.3 — what the plan does not track
+
+- `GET /v1/budget/status` adds `unplanned` and `excluded`: visible expense categories with spending or a
+  negative balance this month that are not in the plan, and the plan's `excluded` ones with activity
+  (`offPlan()` in `src/budget/pace.ts`), largest spend first. Measured 2026-11-21: seven categories held
+  -22,960.83 with no line in `/status`, on the page or in the advisor's messages.
+- `/budget` renders them; `excluded` is collapsed and labelled as a decision.
+
 ## 0.3.2 — free money before moves
 
 - `propose`: `need = max(0, planned - budgeted, -balance)`. Measured 2026-11-21: Kvish6 planned 55,

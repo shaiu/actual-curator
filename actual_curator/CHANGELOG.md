@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3
+
+- `/budget` shows a "Not in the plan" section: categories with spending this month that the plan does
+  not track, with what was spent and the balance. Overspending there comes out of next month, so it
+  is no longer invisible. Categories left out of the plan on purpose are listed apart, collapsed.
+
 ## 0.3.2
 
 - A proposal now covers every overspent planned line back to zero from money that has no job yet,

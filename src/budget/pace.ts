@@ -91,3 +91,26 @@ export function suggestMoves(plan: Plan, lines: PaceLine[], _today: string, free
   }
   return moves;
 }
+
+/** A category with activity this month that the plan does not track. Amounts in minor units; `spent` is positive. */
+export type OffPlanLine = { categoryId: string; label: string; spent: number; balance: number };
+
+/**
+ * Visible expense categories with spending or a negative balance this month that the plan does not track
+ * (`unplanned`), and the plan's `excluded` ones with activity. Their overspending still leaves next month's
+ * To budget, so a page or a message that shows only plan lines hides real money (2026-11-21: seven such
+ * categories held -22,960.83 with no line anywhere). Largest spend first.
+ */
+export function offPlan(plan: Plan, snap: MonthSnapshot): { unplanned: OffPlanLine[]; excluded: OffPlanLine[] } {
+  const kind = new Map(plan.categories.map((c) => [c.categoryId, c.kind]));
+  const unplanned: OffPlanLine[] = [];
+  const excluded: OffPlanLine[] = [];
+  for (const c of snap.categories) {
+    if (c.hidden || c.isIncome || (c.spent === 0 && c.balance >= 0)) continue;
+    const k = kind.get(c.id);
+    if (k !== undefined && k !== 'excluded') continue;
+    (k === 'excluded' ? excluded : unplanned).push({ categoryId: c.id, label: c.label, spent: -c.spent, balance: c.balance });
+  }
+  const order = (a: OffPlanLine, b: OffPlanLine) => b.spent - a.spent || cmp(a.label, b.label);
+  return { unplanned: unplanned.sort(order), excluded: excluded.sort(order) };
+}
