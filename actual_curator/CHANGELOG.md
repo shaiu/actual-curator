@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- `/budget`: each line is measured against what it held this month, money carried over from earlier
+  months included, so a line that spends last month's leftover no longer shows a full bar over ₪0.
+  Empty lines are left out. Suggested moves show only when no proposal is giving money, and read
+  "Gas ← Phone ₪80" instead of a scrambled sentence. Category names no longer reorder Hebrew text.
+
 ## 0.3.0
 
 - New page, `/budget`: the month's budget on one phone-sized page, Hebrew by default, behind the same

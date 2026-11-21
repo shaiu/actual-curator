@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 — /budget reads carry-over
+
+- A line's bar and "spent X of Y" use `balance + spent` (what the envelope held this month), and the
+  hero's "left" is the sum of the lines' balances. Measured 2026-11-21: Entertainment read "₪941 of ₪0"
+  with ₪133 left, because ₪1,074 had carried in.
+- Lines with nothing held and nothing spent are hidden; names are wrapped in `<bdi>`; `moves` render as
+  `from ← to amount` and only while the proposal gives nothing.
+
 ## 0.3.0 — a budget page
 
 - `GET /budget` (`src/http/budget-page.ts`): a read-only page over `GET /v1/budget/status` and

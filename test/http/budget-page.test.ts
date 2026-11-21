@@ -71,3 +71,32 @@ test('GET /budget needs a Cloudflare Access sign-in, and does not exist without 
   expect(await r.text()).toContain('dir="ltr"');
   expect((await pageOf(s).request('/budget', signed)).status).toBe(404);
 });
+
+const mny = (n: number) => ({ amount: n * 100, formatted: n.toFixed(2) });
+const line = (label: string, budgeted: number, spent: number, balance: number) => ({ categoryId: label, label, kind: 'variable' as const,
+  budgeted: mny(budgeted), spent: mny(spent), balance: mny(balance), expectedByToday: mny(0), projected: mny(spent), status: 'ok' as const });
+const view = (lines: ReturnType<typeof line>[], proposing: boolean) => ({ month: '2026-11', today: '2026-11-21', error: null,
+  status: { month: '2026-11', today: '2026-11-21', totals: { budgeted: mny(0), spent: mny(0), balance: mny(0) }, lines,
+    moves: [{ fromLabel: 'Needs / Gas ⛽', toLabel: 'Bills / Phone', amount: mny(80) }] },
+  proposal: { proposal: { proposalId: 'abcdef123456', available: mny(100), proposed: mny(proposing ? 50 : 0), remaining: mny(50),
+    lines: [{ label: 'Wants / Fun', priority: 3, planned: mny(50), budgeted: mny(0), propose: mny(proposing ? 50 : 0), unfunded: mny(0) }] },
+    landed: [], expected: [] } });
+
+test('a line is measured against what it held this month, carry-over included (Entertainment, 2026-11-21)', () => {
+  const html = renderBudget(view([line('Wants / Entertainment', 0, 941, 133)], false), 'en');
+  expect(html).toContain('₪941 of ₪1,074');
+  expect(html).toContain('₪133 left');
+  expect(html).toContain('of ₪1,074 the lines held this month');
+});
+
+test('an empty line is left out, and names are direction-isolated', () => {
+  const html = renderBudget(view([line('Needs / Beauty care', 0, 0, 0), line('Needs / Gas ⛽', 1855, 384, 1471)], false), 'he');
+  expect(html).not.toContain('Beauty care');
+  expect(html).toContain('<bdi>Gas ⛽</bdi>');
+});
+
+test('suggested moves show only while no proposal gives money', () => {
+  const lines = [line('Needs / Gas ⛽', 1855, 384, 1471)];
+  expect(renderBudget(view(lines, false), 'he')).toContain('<bdi>Gas ⛽</bdi> ← <bdi>Phone</bdi>');
+  expect(renderBudget(view(lines, true), 'he')).not.toContain('היועץ עשוי להציע העברה');
+});

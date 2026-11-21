@@ -58,7 +58,7 @@ export type Lang = 'he' | 'en';
 const T = {
   he: {
     title: 'התקציב שלנו', other: 'English', dayOf: (d: number, n: number) => `יום ${d} מתוך ${n}`, whole: 'כל החודש',
-    leftDaily: 'נשאר להוצאות שוטפות', ofBudget: (b: string) => `מתוך ${b} שתוקצבו`,
+    leftDaily: 'נשאר להוצאות שוטפות', ofBudget: (b: string) => `מתוך ${b} שהיו בקווים החודש`,
     onPace: 'בקצב', overPace: (a: string) => `${a} מעל הקצב להיום`, underPace: (a: string) => `${a} מתחת לקצב להיום`,
     free: 'כסף שעוד לא קיבל תפקיד', daily: 'הוצאות שוטפות', fixed: 'חשבונות קבועים', setaside: 'חיסכון לדברים גדולים',
     left: (a: string) => `נשאר ${a}`, over: (a: string) => `חריגה ${a}`, paid: 'שולם', due: (a: string) => `ממתין ${a}`,
@@ -67,13 +67,13 @@ const T = {
     covers: 'מכסה חריגה', unfunded: 'לא מומן', noProposal: 'אין כרגע מה לחלק: כל הקווים מתוקצבים או שאין כסף פנוי.',
     approve: (id: string) => `לאישור, כתבו בקבוצת כספים: "מאשר" על הצעה #${id}`,
     income: 'הכנסות', landed: 'נכנס', expected: (d: number) => `צפוי בערך ב-${d} לחודש`,
-    moves: 'היועץ עשוי להציע העברה', move: (a: string, f: string, t: string) => `${a} מ${f} ל${t}`,
+    moves: 'היועץ עשוי להציע העברה',
     noPlan: 'עוד אין תוכנית תקציב. היא נבנית בשיחה עם היועץ בקבוצת כספים.', error: 'לא הצלחתי לקרוא את התקציב:',
     legend: 'הקו האנכי: כמה היה צפוי לצאת עד היום.',
   },
   en: {
     title: 'Our budget', other: 'עברית', dayOf: (d: number, n: number) => `Day ${d} of ${n}`, whole: 'Whole month',
-    leftDaily: 'Left for day-to-day', ofBudget: (b: string) => `of ${b} budgeted`,
+    leftDaily: 'Left for day-to-day', ofBudget: (b: string) => `of ${b} the lines held this month`,
     onPace: 'On pace', overPace: (a: string) => `${a} ahead of today's pace`, underPace: (a: string) => `${a} under today's pace`,
     free: 'Money without a job yet', daily: 'Day-to-day', fixed: 'Fixed bills', setaside: 'Saving for big things',
     left: (a: string) => `${a} left`, over: (a: string) => `${a} over`, paid: 'Paid', due: (a: string) => `${a} due`,
@@ -82,7 +82,7 @@ const T = {
     covers: 'covers overspending', unfunded: 'not funded', noProposal: 'Nothing to give right now: every line is funded, or no money is free.',
     approve: (id: string) => `To approve, answer "yes" to proposal #${id} in the finance group.`,
     income: 'Income', landed: 'Landed', expected: (d: number) => `expected around the ${d}th`,
-    moves: 'The advisor may suggest a move', move: (a: string, f: string, t: string) => `${a} from ${f} to ${t}`,
+    moves: 'The advisor may suggest a move',
     noPlan: 'No budget plan yet. It is built in a conversation with the advisor in the finance group.', error: 'Could not read the budget:',
     legend: 'The vertical line: what was expected to be spent by today.',
   },
@@ -92,6 +92,10 @@ const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt
 /** Whole shekels, minus before the sign: the page is for reading, not reconciling. */
 const ils = (minor: number) => `${minor < 0 ? '-' : ''}₪${Math.round(Math.abs(minor) / 100).toLocaleString('en-US')}`;
 const name = (label: string) => { const i = label.indexOf(' / '); return i < 0 ? label : label.slice(i + 3); };
+/** A category name in its own direction, so an English or emoji name cannot reorder the Hebrew around it. */
+const nm = (label: string) => `<bdi>${esc(name(label))}</bdi>`;
+/** What the envelope held this month: carried-in balance plus this month's budget, i.e. balance + spent. */
+const held = (l: StatusLine) => l.balance.amount + l.spent.amount;
 const monthName = (month: string, lang: Lang) => new Intl.DateTimeFormat(lang === 'he' ? 'he-IL' : 'en-GB',
   { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${month}-15T00:00:00Z`));
 const shortMonth = (month: string, lang: Lang) => new Intl.DateTimeFormat(lang === 'he' ? 'he-IL' : 'en-GB',
@@ -109,30 +113,32 @@ export function renderBudget(v: BudgetPageData, lang: Lang): string {
     body.push(`<section><p>${v.error === 'no_plan' ? esc(t.noPlan) : `${esc(t.error)} ${esc(v.error ?? '')}`}</p></section>`);
   } else {
     const lines = v.status.lines;
-    const daily = lines.filter(l => l.kind === 'variable');
+    // A line with nothing in it and nothing spent says nothing: leave it out.
+    const daily = lines.filter(l => l.kind === 'variable' && (held(l) !== 0 || l.spent.amount !== 0));
     const fixed = lines.filter(l => l.kind === 'fixed');
     const saves = lines.filter(l => l.kind === 'setaside');
     const sum = (ls: StatusLine[], f: (l: StatusLine) => number) => ls.reduce((s, l) => s + f(l), 0);
 
     // Hero: what is left for day-to-day, and pace against today.
-    const dBudget = sum(daily, l => l.budgeted.amount), dSpent = sum(daily, l => l.spent.amount);
+    // Left is what Actual shows as the lines' balances (carry-over included), out of what they held this month.
+    const dHeld = sum(daily, held), dSpent = sum(daily, l => l.spent.amount);
     const dExpected = sum(daily, l => l.expectedByToday.amount);
-    const left = dBudget - dSpent, gap = dSpent - dExpected;
+    const left = sum(daily, l => l.balance.amount), gap = dSpent - dExpected;
     const paceTxt = !current ? '' : Math.abs(gap) < 10_000 ? t.onPace : gap > 0 ? t.overPace(ils(gap)) : t.underPace(ils(-gap));
     const free = v.proposal?.proposal.available.amount;
     body.push(`<section class="hero"><div class="label">${esc(t.leftDaily)}</div>
-<div class="big ${left < 0 ? 'neg' : ''}">${ils(left)}</div><div class="sub">${esc(t.ofBudget(ils(dBudget)))}</div>
+<div class="big ${left < 0 ? 'neg' : ''}">${ils(left)}</div><div class="sub">${esc(t.ofBudget(ils(dHeld)))}</div>
 ${paceTxt ? `<p class="pace ${current && gap >= 10_000 ? 'warn' : 'good'}">${esc(paceTxt)}</p>` : ''}
 ${free !== undefined ? `<div class="chip ${free < 0 ? 'neg' : ''}">${esc(t.free)}: <b>${ils(free)}</b></div>` : ''}</section>`);
 
     // Day-to-day: a bar per line, spent against budgeted, with today's expected mark (Copilot-style pace).
     if (daily.length) {
       const row = (l: StatusLine) => {
-        const b = l.budgeted.amount, s = l.spent.amount, bal = l.balance.amount;
+        const b = held(l), s = l.spent.amount, bal = l.balance.amount;
         const scale = Math.max(b, s, 1);
         const tag = bal < 0 ? `<span class="off">${esc(t.over(ils(-bal)))}</span>` : `<span>${esc(t.left(ils(bal)))}</span>`;
         const mark = current && b > 0 ? `<em style="inset-inline-start:${pct(l.expectedByToday.amount, scale).toFixed(1)}%"></em>` : '';
-        return `<li class="${l.status}"><div class="row"><span class="name">${esc(name(l.label))}</span>${tag}</div>
+        return `<li class="${l.status}"><div class="row"><span class="name">${nm(l.label)}</span>${tag}</div>
 <div class="bar"><i style="width:${pct(s, scale).toFixed(1)}%"></i>${mark}</div><div class="sub">${esc(t.spentOf(ils(s), ils(b)))}</div></li>`;
       };
       const order = { off: 0, watch: 1, ok: 2 } as const;
@@ -144,12 +150,12 @@ ${current ? `<p class="legend">${esc(t.legend)}</p>` : ''}</section>`);
         const b = l.budgeted.amount, s = l.spent.amount, bal = l.balance.amount;
         const state = bal < 0 ? `<span class="off">${esc(t.over(ils(-bal)))}</span>`
           : s > 0 && s >= b ? `<span class="good">✓ ${esc(t.paid)}</span>` : `<span class="mute">${esc(t.due(ils(Math.max(0, b - s))))}</span>`;
-        return `<tr><td>${esc(name(l.label))}</td><td class="n">${ils(b)}</td><td class="n">${state}</td></tr>`;
+        return `<tr><td>${nm(l.label)}</td><td class="n">${ils(b)}</td><td class="n">${state}</td></tr>`;
       }).join('')}</table></section>`);
     }
     if (saves.length) {
       body.push(`<section><h2>${esc(t.setaside)}</h2><table>${saves.map(l =>
-        `<tr><td>${esc(name(l.label))}</td><td class="n">${esc(t.saved(ils(l.balance.amount)))}</td></tr>`).join('')}</table></section>`);
+        `<tr><td>${nm(l.label)}</td><td class="n">${esc(t.saved(ils(l.balance.amount)))}</td></tr>`).join('')}</table></section>`);
     }
 
     // The advisor's proposal, as the advisor would send it: what is free, then each line it would fund.
@@ -160,11 +166,11 @@ ${current ? `<p class="legend">${esc(t.legend)}</p>` : ''}</section>`);
       const id = p.proposalId.slice(0, 6);
       body.push(`<section class="proposal"><h2>${esc(t.proposal)} <span class="mute">#${esc(id)}</span></h2>
 <div class="row"><span>${esc(t.available)}</span><b>${ils(p.available.amount)}</b></div>
-${give.length ? `<table>${give.map(l => `<tr><td>${esc(name(l.label))}${l.covers && l.covers.amount > 0 ? ` <small class="mute">· ${esc(t.covers)}</small>` : ''}</td>`
+${give.length ? `<table>${give.map(l => `<tr><td>${nm(l.label)}${l.covers && l.covers.amount > 0 ? ` <small class="mute">· ${esc(t.covers)}</small>` : ''}</td>`
         + `<td class="n good">${esc(t.proposedLine(ils(l.propose.amount)))}</td></tr>`).join('')}</table>
 <p class="sub">${esc(t.approve(id))}</p>` : `<p class="sub">${esc(t.noProposal)}</p>`}
 ${short.length ? `<details><summary>${esc(t.unfunded)} (${short.length})</summary><table>${short.map(l =>
-        `<tr><td>${esc(name(l.label))}</td><td class="n off">${ils(l.unfunded.amount)}</td></tr>`).join('')}</table></details>` : ''}
+        `<tr><td>${nm(l.label)}</td><td class="n off">${ils(l.unfunded.amount)}</td></tr>`).join('')}</table></details>` : ''}
 </section>`);
       const inc = v.proposal;
       if (inc.landed.length || inc.expected.length) {
@@ -173,9 +179,12 @@ ${short.length ? `<details><summary>${esc(t.unfunded)} (${short.length})</summar
 ${inc.expected.map(e => `<tr><td>${esc(e.source)}</td><td></td><td class="n mute">${esc(t.expected(e.expectedDay))}</td></tr>`).join('')}</table></section>`);
       }
     }
-    if (v.status.moves.length) {
-      body.push(`<section><h2>${esc(t.moves)}</h2><ul>${v.status.moves.map(m =>
-        `<li>${esc(t.move(ils(m.amount.amount), name(m.fromLabel), name(m.toLabel)))}</li>`).join('')}</ul></section>`);
+    // Moves are the way to cover an overspend when no money is free; while a proposal gives money, it is the answer.
+    const proposing = (v.proposal?.proposal.lines ?? []).some(l => l.propose.amount > 0);
+    if (v.status.moves.length && !proposing) {
+      const arrow = lang === 'he' ? '←' : '→';
+      body.push(`<section><h2>${esc(t.moves)}</h2><table>${v.status.moves.map(m =>
+        `<tr><td>${nm(m.fromLabel)} ${arrow} ${nm(m.toLabel)}</td><td class="n">${ils(m.amount.amount)}</td></tr>`).join('')}</table></section>`);
     }
   }
 
