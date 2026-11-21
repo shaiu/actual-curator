@@ -15,7 +15,10 @@ export type StatusLine = {
 export type StatusJson = {
   month: string; today: string; totals: { budgeted: Money; spent: Money; balance: Money };
   lines: StatusLine[]; moves: { fromLabel: string; toLabel: string; amount: Money }[];
+  /** Curator 0.3.3+: categories with activity that the plan does not track, and the plan's excluded ones. */
+  unplanned?: OffPlan[]; excluded?: OffPlan[];
 };
+type OffPlan = { categoryId: string; label: string; spent: Money; balance: Money };
 export type ProposalJson = {
   proposal: {
     proposalId: string; available: Money; proposed: Money; remaining: Money; coversOverspend?: Money;
@@ -70,6 +73,8 @@ const T = {
     moves: 'היועץ עשוי להציע העברה',
     noPlan: 'עוד אין תוכנית תקציב. היא נבנית בשיחה עם היועץ בקבוצת כספים.', error: 'לא הצלחתי לקרוא את התקציב:',
     legend: 'הקו האנכי: כמה היה צפוי לצאת עד היום. אדום: נגמר או בחריגה. כתום: מוציאים מהר מהחודש.',
+    unplanned: 'לא בתוכנית', unplannedHint: 'כסף שיצא בקטגוריות שהתוכנית לא עוקבת אחריהן. חריגה כאן יורדת מהחודש הבא. כדי לעקוב ולכסות, בקשו מהיועץ להוסיף אותן לתוכנית.',
+    excludedTitle: (n: number) => `מחוץ לתוכנית בהחלטה (${n})`, spentBal: (s: string, b: string) => `הוצא ${s} · יתרה ${b}`,
     freeHint: 'כסף שנכנס ולא שויך לשום קו. הוא עובר לחודש הבא ומשמש כרית.',
     leftHint: 'מה שעוד נשאר בקווי ההוצאות השוטפות, כולל יתרות מחודשים קודמים.',
   },
@@ -87,6 +92,8 @@ const T = {
     moves: 'The advisor may suggest a move',
     noPlan: 'No budget plan yet. It is built in a conversation with the advisor in the finance group.', error: 'Could not read the budget:',
     legend: 'The vertical line: what was expected to be spent by today. Red: used up or over. Amber: spending faster than the month.',
+    unplanned: 'Not in the plan', unplannedHint: 'Money spent in categories the plan does not track. Overspending here comes out of next month. To track and cover them, ask the advisor to add them to the plan.',
+    excludedTitle: (n: number) => `Left out by decision (${n})`, spentBal: (s: string, b: string) => `spent ${s} · balance ${b}`,
     freeHint: 'Money that came in and is not assigned to any line. It carries into next month as a cushion.',
     leftHint: 'What is still in the day-to-day lines, including balances carried from earlier months.',
   },
@@ -157,6 +164,17 @@ ${current ? `<p class="legend">${esc(t.legend)}</p>` : ''}</section>`);
           : s > 0 && s >= b ? `<span class="good">✓ ${esc(t.paid)}</span>` : `<span class="mute">${esc(t.due(ils(Math.max(0, b - s))))}</span>`;
         return `<tr><td>${nm(l.label)}</td><td class="n">${ils(b)}</td><td class="n">${state}</td></tr>`;
       }).join('')}</table></section>`);
+    }
+    const offRow = (l: OffPlan) => `<tr><td>${nm(l.label)}</td><td class="n mute">${esc(t.spentBal(ils(l.spent.amount), ils(l.balance.amount)))}</td></tr>`;
+    const unplanned = v.status.unplanned ?? [], excluded = v.status.excluded ?? [];
+    if (unplanned.length) {
+      body.push(`<section class="unplanned"><h2>${esc(t.unplanned)}</h2><table>${unplanned.map(l =>
+        `<tr><td>${nm(l.label)}</td><td class="n">${ils(l.spent.amount)}</td><td class="n ${l.balance.amount < 0 ? 'off' : 'mute'}">${l.balance.amount < 0
+          ? esc(t.over(ils(-l.balance.amount))) : esc(t.left(ils(l.balance.amount)))}</td></tr>`).join('')}</table>
+<p class="hint">${esc(t.unplannedHint)}</p>
+${excluded.length ? `<details><summary>${esc(t.excludedTitle(excluded.length))}</summary><table>${excluded.map(offRow).join('')}</table></details>` : ''}</section>`);
+    } else if (excluded.length) {
+      body.push(`<section><details><summary>${esc(t.excludedTitle(excluded.length))}</summary><table>${excluded.map(offRow).join('')}</table></details></section>`);
     }
     if (saves.length) {
       body.push(`<section><h2>${esc(t.setaside)}</h2><table>${saves.map(l =>

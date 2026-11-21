@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { planSchema, type CategoryMonth, type MonthSnapshot, type PlanInput } from '../../src/budget/types.ts';
 import { PlanError } from '../../src/budget/propose.ts';
-import { pace, suggestMoves, type PaceLine } from '../../src/budget/pace.ts';
+import { offPlan, pace, suggestMoves, type PaceLine } from '../../src/budget/pace.ts';
 
 const cat = (id: string, o: Partial<CategoryMonth> = {}): CategoryMonth => ({
   id, label: id, hidden: false, isIncome: false, budgeted: 0, spent: 0, balance: 0, ...o,
@@ -218,5 +218,30 @@ describe('suggestMoves with free money (2026-11-21: moves were offered beside â‚
   });
   it('no free money behaves as before', () => {
     expect(suggestMoves(p, lines, '2026-11-21').map((m) => m.amount)).toEqual([7200 + 800]);
+  });
+});
+
+describe('offPlan', () => {
+  const p = planSchema.parse({ version: 1, incomeSources: [], categories: [
+    { categoryId: 'groc', kind: 'variable', priority: 2, amount: 1000 },
+    { categoryId: 'biz', kind: 'excluded', priority: 9 },
+  ] });
+  const c = (id: string, o: Partial<CategoryMonth> = {}): CategoryMonth =>
+    ({ id, label: `G / ${id}`, hidden: false, isIncome: false, budgeted: 0, spent: 0, balance: 0, ...o });
+  const s: MonthSnapshot = { month: '2026-11', toBudget: 0, categories: [
+    c('groc', { spent: -50000, balance: -10000 }),
+    c('auto', { spent: -292183, balance: -292183 }),
+    c('usa', { spent: -337400, balance: -337400 }),
+    c('quiet', { budgeted: 10000, balance: 10000 }),
+    c('refund', { spent: 5000, balance: 5000 }),
+    c('old', { spent: -100, balance: -100, hidden: true }),
+    c('sal', { spent: 0, balance: -1, isIncome: true }),
+    c('biz', { spent: -1576600, balance: -1576600 }),
+  ] };
+  it('lists categories with activity the plan does not track, largest spend first, and the excluded ones apart', () => {
+    const r = offPlan(p, s);
+    expect(r.unplanned.map((l) => l.categoryId)).toEqual(['usa', 'auto', 'refund']);
+    expect(r.unplanned[0]).toMatchObject({ spent: 337400, balance: -337400 });
+    expect(r.excluded.map((l) => l.categoryId)).toEqual(['biz']);
   });
 });

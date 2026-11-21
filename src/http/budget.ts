@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { BudgetWriteUnconfirmedError } from '../actual/store.ts';
 import { addMonths, currentMonth, daysInMonth, jerusalemToday, previousMonth } from '../budget/dates.ts';
 import { buildEvents, type BudgetEvent, type IncomeRow, incomeStatus } from '../budget/events.ts';
-import { type Move, pace, type PaceLine, suggestMoves } from '../budget/pace.ts';
+import { type Move, offPlan, type OffPlanLine, pace, type PaceLine, suggestMoves } from '../budget/pace.ts';
 import { availableFor, checkAccounts, checkPlan, fundingShortfall, PlanError, propose, proposalId } from '../budget/propose.ts';
 import { type MonthSnapshot, type Plan, planSchema } from '../budget/types.ts';
 import { ApiError } from './errors.ts';
@@ -37,6 +37,7 @@ const planAmounts = (plan: Plan): number[] => [
 const moneyPace = (l: PaceLine) => ({ ...l, budgeted: money(l.budgeted), spent: money(l.spent), balance: money(l.balance),
   expectedByToday: money(l.expectedByToday), projected: money(l.projected) });
 const moneyMove = (m: Move) => ({ ...m, amount: money(m.amount) });
+const moneyOff = (l: OffPlanLine) => ({ ...l, spent: money(l.spent), balance: money(l.balance) });
 const moneyEvent = (e: BudgetEvent) => (e.kind === 'income' ? { ...e, amount: money(e.amount) } : e);
 
 const day30Before = (today: string): string => dayBefore(today, 30);
@@ -258,9 +259,11 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const events = buildEvents({ plan, month, today, income, lines, reviewIds, acked: budget.state().acked,
       ...(planSince ? { planSince } : {}) });
     const sum = (f: (l: PaceLine) => number) => lines.reduce((s, l) => s + f(l), 0);
+    const off = offPlan(plan, snap);
     return c.json({ month, today,
       totals: { budgeted: money(sum(l => l.budgeted)), spent: money(sum(l => l.spent)), balance: money(sum(l => l.balance)) },
-      lines: lines.map(moneyPace), moves: moves.map(moneyMove), events: events.map(moneyEvent) });
+      lines: lines.map(moneyPace), moves: moves.map(moneyMove), events: events.map(moneyEvent),
+      unplanned: off.unplanned.map(moneyOff), excluded: off.excluded.map(moneyOff) });
   });
 
   app.post(`${g}/status/ack`, async c => {

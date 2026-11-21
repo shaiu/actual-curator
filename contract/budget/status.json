@@ -232,6 +232,34 @@
         "kind": "review",
         "count": 1
       }
+    ],
+    "unplanned": [
+      {
+        "categoryId": "misc",
+        "label": "Wants / Misc",
+        "spent": {
+          "amount": 3000,
+          "formatted": "30.00"
+        },
+        "balance": {
+          "amount": -3000,
+          "formatted": "-30.00"
+        }
+      }
+    ],
+    "excluded": [
+      {
+        "categoryId": "biz",
+        "label": "Biz / Inbal",
+        "spent": {
+          "amount": 7000,
+          "formatted": "70.00"
+        },
+        "balance": {
+          "amount": -7000,
+          "formatted": "-70.00"
+        }
+      }
     ]
   }
 }
