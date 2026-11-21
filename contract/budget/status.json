@@ -1,0 +1,237 @@
+{
+  "route": "GET /v1/budget/status",
+  "status": 200,
+  "body": {
+    "month": "2026-11",
+    "today": "2026-11-22",
+    "totals": {
+      "budgeted": {
+        "amount": 300000,
+        "formatted": "3000.00"
+      },
+      "spent": {
+        "amount": 195000,
+        "formatted": "1950.00"
+      },
+      "balance": {
+        "amount": 105000,
+        "formatted": "1050.00"
+      }
+    },
+    "lines": [
+      {
+        "categoryId": "rent",
+        "label": "Needs / Rent",
+        "kind": "fixed",
+        "budgeted": {
+          "amount": 0,
+          "formatted": "0.00"
+        },
+        "spent": {
+          "amount": 0,
+          "formatted": "0.00"
+        },
+        "balance": {
+          "amount": 0,
+          "formatted": "0.00"
+        },
+        "expectedByToday": {
+          "amount": 0,
+          "formatted": "0.00"
+        },
+        "projected": {
+          "amount": 0,
+          "formatted": "0.00"
+        },
+        "status": "ok"
+      },
+      {
+        "categoryId": "groc",
+        "label": "Needs / Groceries",
+        "kind": "variable",
+        "budgeted": {
+          "amount": 100000,
+          "formatted": "1000.00"
+        },
+        "spent": {
+          "amount": 105000,
+          "formatted": "1050.00"
+        },
+        "balance": {
+          "amount": -5000,
+          "formatted": "-50.00"
+        },
+        "expectedByToday": {
+          "amount": 73333,
+          "formatted": "733.33"
+        },
+        "projected": {
+          "amount": 131667,
+          "formatted": "1316.67"
+        },
+        "status": "off"
+      },
+      {
+        "categoryId": "prot",
+        "label": "Needs / Insurance",
+        "kind": "variable",
+        "budgeted": {
+          "amount": 30000,
+          "formatted": "300.00"
+        },
+        "spent": {
+          "amount": 0,
+          "formatted": "0.00"
+        },
+        "balance": {
+          "amount": 30000,
+          "formatted": "300.00"
+        },
+        "expectedByToday": {
+          "amount": 22000,
+          "formatted": "220.00"
+        },
+        "projected": {
+          "amount": 8000,
+          "formatted": "80.00"
+        },
+        "status": "ok"
+      },
+      {
+        "categoryId": "dine",
+        "label": "Wants / Dining",
+        "kind": "variable",
+        "budgeted": {
+          "amount": 100000,
+          "formatted": "1000.00"
+        },
+        "spent": {
+          "amount": 90000,
+          "formatted": "900.00"
+        },
+        "balance": {
+          "amount": 10000,
+          "formatted": "100.00"
+        },
+        "expectedByToday": {
+          "amount": 73333,
+          "formatted": "733.33"
+        },
+        "projected": {
+          "amount": 116667,
+          "formatted": "1166.67"
+        },
+        "status": "watch"
+      },
+      {
+        "categoryId": "fun",
+        "label": "Wants / Fun",
+        "kind": "variable",
+        "budgeted": {
+          "amount": 50000,
+          "formatted": "500.00"
+        },
+        "spent": {
+          "amount": 0,
+          "formatted": "0.00"
+        },
+        "balance": {
+          "amount": 50000,
+          "formatted": "500.00"
+        },
+        "expectedByToday": {
+          "amount": 36667,
+          "formatted": "366.67"
+        },
+        "projected": {
+          "amount": 13333,
+          "formatted": "133.33"
+        },
+        "status": "ok"
+      },
+      {
+        "categoryId": "trip",
+        "label": "Wants / Trip",
+        "kind": "setaside",
+        "budgeted": {
+          "amount": 20000,
+          "formatted": "200.00"
+        },
+        "spent": {
+          "amount": 0,
+          "formatted": "0.00"
+        },
+        "balance": {
+          "amount": 20000,
+          "formatted": "200.00"
+        },
+        "expectedByToday": {
+          "amount": 14667,
+          "formatted": "146.67"
+        },
+        "projected": {
+          "amount": 0,
+          "formatted": "0.00"
+        },
+        "status": "watch"
+      }
+    ],
+    "moves": [
+      {
+        "from": "fun",
+        "fromLabel": "Wants / Fun",
+        "to": "groc",
+        "toLabel": "Needs / Groceries",
+        "amount": {
+          "amount": 32000,
+          "formatted": "320.00"
+        }
+      }
+    ],
+    "events": [
+      {
+        "id": "income:t",
+        "kind": "income",
+        "source": "Salary",
+        "amount": {
+          "amount": 1500000,
+          "formatted": "15000.00"
+        },
+        "date": "2026-11-10",
+        "transactionId": "t"
+      },
+      {
+        "id": "transfer:2026-11",
+        "kind": "transfer_missing",
+        "source": "Alimony",
+        "expectedDay": 5
+      },
+      {
+        "id": "pace:2026-11:groc:off",
+        "kind": "pace",
+        "categoryId": "groc",
+        "label": "Needs / Groceries",
+        "status": "off"
+      },
+      {
+        "id": "pace:2026-11:dine:watch",
+        "kind": "pace",
+        "categoryId": "dine",
+        "label": "Wants / Dining",
+        "status": "watch"
+      },
+      {
+        "id": "pace:2026-11:trip:watch",
+        "kind": "pace",
+        "categoryId": "trip",
+        "label": "Wants / Trip",
+        "status": "watch"
+      },
+      {
+        "id": "review:81e4a9384d11",
+        "kind": "review",
+        "count": 1
+      }
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "route": "POST /v1/budget/apply",
+  "status": 200,
+  "body": {
+    "month": "2026-11",
+    "applied": [
+      {
+        "categoryId": "groc",
+        "label": "Needs / Groceries",
+        "added": {
+          "amount": 5000,
+          "formatted": "50.00"
+        },
+        "budgeted": {
+          "amount": 105000,
+          "formatted": "1050.00"
+        }
+      },
+      {
+        "categoryId": "misc",
+        "label": "Wants / Misc",
+        "added": {
+          "amount": 10050,
+          "formatted": "100.50"
+        },
+        "budgeted": {
+          "amount": 10050,
+          "formatted": "100.50"
+        }
+      }
+    ],
+    "toBudget": {
+      "amount": 484950,
+      "formatted": "4849.50"
+    }
+  }
+}

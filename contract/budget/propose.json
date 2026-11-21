@@ -1,0 +1,127 @@
+{
+  "route": "GET /v1/budget/propose",
+  "status": 200,
+  "body": {
+    "proposal": {
+      "month": "2026-11",
+      "proposalId": "b48b95c2c420",
+      "available": {
+        "amount": 500000,
+        "formatted": "5000.00"
+      },
+      "proposed": {
+        "amount": 280000,
+        "formatted": "2800.00"
+      },
+      "remaining": {
+        "amount": 220000,
+        "formatted": "2200.00"
+      },
+      "lines": [
+        {
+          "categoryId": "rent",
+          "label": "Needs / Rent",
+          "kind": "fixed",
+          "priority": 1,
+          "planned": {
+            "amount": 280000,
+            "formatted": "2800.00"
+          },
+          "budgeted": {
+            "amount": 0,
+            "formatted": "0.00"
+          },
+          "propose": {
+            "amount": 280000,
+            "formatted": "2800.00"
+          },
+          "unfunded": {
+            "amount": 0,
+            "formatted": "0.00"
+          }
+        },
+        {
+          "categoryId": "groc",
+          "label": "Needs / Groceries",
+          "kind": "variable",
+          "priority": 2,
+          "planned": {
+            "amount": 100000,
+            "formatted": "1000.00"
+          },
+          "budgeted": {
+            "amount": 100000,
+            "formatted": "1000.00"
+          },
+          "propose": {
+            "amount": 0,
+            "formatted": "0.00"
+          },
+          "unfunded": {
+            "amount": 0,
+            "formatted": "0.00"
+          }
+        },
+        {
+          "categoryId": "prot",
+          "label": "Needs / Insurance",
+          "kind": "variable",
+          "priority": 2,
+          "planned": {
+            "amount": 30000,
+            "formatted": "300.00"
+          },
+          "budgeted": {
+            "amount": 30000,
+            "formatted": "300.00"
+          },
+          "propose": {
+            "amount": 0,
+            "formatted": "0.00"
+          },
+          "unfunded": {
+            "amount": 0,
+            "formatted": "0.00"
+          }
+        },
+        {
+          "categoryId": "fun",
+          "label": "Wants / Fun",
+          "kind": "variable",
+          "priority": 3,
+          "planned": {
+            "amount": 50000,
+            "formatted": "500.00"
+          },
+          "budgeted": {
+            "amount": 50000,
+            "formatted": "500.00"
+          },
+          "propose": {
+            "amount": 0,
+            "formatted": "0.00"
+          },
+          "unfunded": {
+            "amount": 0,
+            "formatted": "0.00"
+          }
+        }
+      ]
+    },
+    "landed": [
+      {
+        "source": "Salary",
+        "amount": {
+          "amount": 1500000,
+          "formatted": "15000.00"
+        },
+        "date": "2026-11-10"
+      }
+    ],
+    "expected": [],
+    "excludedSpentLastMonth": {
+      "amount": 50000,
+      "formatted": "500.00"
+    }
+  }
+}

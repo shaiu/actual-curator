@@ -1,0 +1,10 @@
+{
+  "route": "POST /v1/budget/move",
+  "status": 400,
+  "body": {
+    "error": {
+      "code": "protected_source",
+      "message": "Needs / Insurance is protected and cannot fund moves"
+    }
+  }
+}

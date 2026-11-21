@@ -1,119 +1,16 @@
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { beforeEach, expect, test } from 'vitest';
-import { BudgetWriteUnconfirmedError } from '../../src/actual/store.ts';
-import type { CuratorRow } from '../../src/actual/types.ts';
-import type { CategoryOption } from '../../src/classifier/types.ts';
-import { BudgetFiles } from '../../src/budget/plan-store.ts';
-import type { MonthSnapshot, PlanInput } from '../../src/budget/types.ts';
-import { type ApiStore, createApp } from '../../src/http/app.ts';
-import { DecisionLog } from '../../src/log.ts';
-import { parseVocabulary } from '../../src/vocabulary.ts';
-
-const vocab = parseVocabulary(`
-tags:
-  - { tag: kids, meaning: for a child }
-genericPayees: [PAYBOX]
-memoKeyPatterns: []
-`);
-
-const cat = (id: string, label: string, budgeted: number, spent: number, extra: object = {}) =>
-  ({ id, label, hidden: false, isIncome: false, budgeted, spent, balance: budgeted + spent, ...extra });
-const snapshot = (month: string): MonthSnapshot => ({
-  month, toBudget: 500000,
-  categories: [
-    cat('rent', 'Needs / Rent', 0, 0),
-    cat('groc', 'Needs / Groceries', 100000, -20000),
-    cat('fun', 'Wants / Fun', 50000, 0),
-    cat('prot', 'Needs / Insurance', 30000, 0),
-    cat('biz', 'Biz / Inbal', 0, month === '2026-10' ? -50000 : 0),
-    cat('old', 'Old', 0, 0, { hidden: true }),
-    cat('sal', 'Income / Salary', 0, 0, { isIncome: true }),
-    cat('misc', 'Wants / Misc', 0, 0),
-  ],
-});
-const plan: PlanInput = {
-  version: 1,
-  categories: [
-    { categoryId: 'rent', kind: 'fixed', priority: 1, amount: 2800 },
-    { categoryId: 'groc', kind: 'variable', priority: 2, amount: 1000 },
-    { categoryId: 'fun', kind: 'variable', priority: 3, amount: 500 },
-    { categoryId: 'prot', kind: 'variable', priority: 2, amount: 300, protected: true },
-    { categoryId: 'biz', kind: 'excluded', priority: 9 },
-  ],
-  incomeSources: [{ name: 'Salary', payee: 'Employer', expectedAmount: 15000, expectedDay: 10 }],
-};
-const row = (over: Partial<CuratorRow>): CuratorRow => ({ id: 't', date: '2026-11-10', account: 'a', accountName: 'Bank',
-  amount: 1500000, payee: 'Employer', importedPayee: 'Employer', notes: '', category: null, transferId: null, ...over });
-
-class FakeStore implements ApiStore {
-  snaps = new Map<string, MonthSnapshot>();
-  rows: CuratorRow[] = [];
-  writes: { month: string; amounts: Record<string, number> }[] = [];
-  txQueries: { from: string; to: string; tag?: string; limit: number }[] = [];
-  failSync = false;
-  syncs = 0;
-  onSync: (() => void) | undefined;
-  months = ['2026-10', '2026-11', '2026-12'];
-  async sync() {
-    this.syncs++;
-    if (this.failSync) throw new Error('server unreachable');
-    this.onSync?.();
-  }
-  async budgetMonths() { return [...this.months]; }
-  accountCalls = 0;
-  async accounts() { this.accountCalls++; return [{ id: 'a', name: 'Bank', offbudget: false }, { id: 'off', name: 'Savings', offbudget: true }]; }
-  async categories() { return [] as CategoryOption[]; }
-  async transactions(q: { from: string; to: string; tag?: string; limit: number }) {
-    this.txQueries.push(q);
-    return this.rows.filter(r => r.date >= q.from && r.date <= q.to && (!q.tag || (r.notes ?? '').includes(`#${q.tag}`)));
-  }
-  async transaction() { return undefined; }
-  async update() {}
-  async rules() { return []; }
-  async replaceRule() { return 'r'; }
-  async deleteRule() { return false; }
-  async spend() { return []; }
-  async income() { return []; }
-  async budgetMonth(month: string) {
-    if (this.failPrev && month === '2026-10') throw new Error(this.failPrev);
-    if (!this.snaps.has(month)) this.snaps.set(month, snapshot(month));
-    return structuredClone(this.snaps.get(month)!);
-  }
-  failWrite: boolean | 'unconfirmed' = false;
-  failPrev: string | false = false;
-  async setBudgeted(month: string, amounts: Record<string, number>) {
-    await Promise.resolve();
-    if (this.failWrite === 'unconfirmed') throw new BudgetWriteUnconfirmedError(month);
-    if (this.failWrite) throw new Error('boom');
-    const s = await this.budgetMonth(month);
-    const unknown = Object.keys(amounts).filter(id => !s.categories.some(c => c.id === id));
-    if (unknown.length) throw new Error(`unknown category id(s): ${unknown.join(', ')}`);
-    this.writes.push({ month, amounts });
-    let delta = 0;
-    for (const [id, a] of Object.entries(amounts)) {
-      const c = s.categories.find(x => x.id === id)!;
-      delta += a - c.budgeted;
-      c.balance += a - c.budgeted;
-      c.budgeted = a;
-    }
-    s.toBudget -= delta;
-    this.snaps.set(month, s);
-    // Envelope carry-over: what a month gives away is also missing from every later month's To budget.
-    for (const m of this.months.filter(x => x > month)) {
-      const later = await this.budgetMonth(m);
-      later.toBudget -= delta;
-      this.snaps.set(m, later);
-    }
-  }
-}
+import type { BudgetFiles } from '../../src/budget/plan-store.ts';
+import type { PlanInput } from '../../src/budget/types.ts';
+import type { createApp } from '../../src/http/app.ts';
+import { type FakeStore, PLAN_SAVED, makeBudgetApp, plan, row, snapshot } from '../helpers/budget-http.ts';
 
 let store: FakeStore;
-let clock: Date;
 let files: BudgetFiles;
 let dir: string;
+let setNow: (d: Date) => void;
 let app: ReturnType<typeof createApp>;
 const auth = { authorization: 'Bearer secret' };
 const send = (method: string, body?: unknown) => ({ method, headers: { ...auth, 'content-type': 'application/json' },
@@ -122,17 +19,12 @@ const get = (path: string) => app.request(`/v1/budget${path}`, { headers: auth }
 const post = (path: string, body: unknown) => app.request(`/v1/budget${path}`, send('POST', body));
 const put = (path: string, body: unknown) => app.request(`/v1/budget${path}`, send('PUT', body));
 const errCode = async (r: Response) => ((await r.json()) as { error: { code: string } }).error.code;
-const PLAN_SAVED = new Date('2026-11-01T00:00:00Z');
 const savePlan = () => files.savePlan(plan as never, { by: 't', why: 't' }, PLAN_SAVED);
 
 beforeEach(() => {
-  clock = new Date('2026-11-20T09:00:00Z');
-  store = new FakeStore();
-  dir = mkdtempSync(join(tmpdir(), 'curator-budget-'));
-  files = new BudgetFiles(dir);
-  app = createApp({ store, log: new DecisionLog(dir), vocab, cfg: { token: 'secret', currency: 'ILS' }, classifierName: 'fake',
-    runNow: async () => { throw new Error('unused'); }, versions: { curator: '0.2.0', actualApi: '1', server: '1' },
-    status: () => ({}), budget: files, now: () => clock });
+  const made = makeBudgetApp({ now: new Date('2026-11-20T09:00:00Z') });
+  ({ store, files, dir, app } = made);
+  setNow = made.setNow;
 });
 
 test('GET plan: null before any save', async () => {
@@ -328,7 +220,7 @@ test('status: shape, money() everywhere, and review count over the last 30 days'
   expect(b.lines.some((l: any) => l.categoryId === 'biz')).toBe(false);
   const rid = `review:${createHash('sha256').update('rv').digest('hex').slice(0, 12)}`;
   expect(b.events).toContainEqual({ id: rid, kind: 'review', count: 1 });
-  clock = new Date('2026-11-21T09:00:00Z'); // same unreviewed rows the next day: same id, no new alert
+  setNow(new Date('2026-11-21T09:00:00Z')); // same unreviewed rows the next day: same id, no new alert
   const again = await (await get('/status')).json() as any;
   expect(again.events).toContainEqual({ id: rid, kind: 'review', count: 1 });
   const q = store.txQueries.find(x => x.tag === 'review')!;
@@ -485,7 +377,7 @@ test('I1: propose, apply and move sync first; a sync failure is 503 sync_failed 
 
 test('I2: a salary row from the last day of the previous month still alerts after the month rolls over', async () => {
   savePlan();
-  clock = new Date('2026-12-02T09:00:00Z');
+  setNow(new Date('2026-12-02T09:00:00Z'));
   store.rows = [row({ id: 'nov30', date: '2026-11-30' })];
   const b = await statusOf();
   expect(b.month).toBe('2026-12');
@@ -496,7 +388,7 @@ test('I2: a salary row from the last day of the previous month still alerts afte
 
 test('I2: a transfer due across the month boundary is reported missing from the next month', async () => {
   savePlanOf({ ...plan, incomeSources: [{ name: 'Alimony', payee: 'Inbal', expectedAmount: 5000, expectedDay: 29, fixedTransfer: true }] });
-  clock = new Date('2026-12-05T09:00:00Z');
+  setNow(new Date('2026-12-05T09:00:00Z'));
   const ids = async () => (await statusOf()).events.map((e: any) => e.id) as string[];
   expect(await ids()).toContain('transfer:2026-11');
   store.rows = [row({ id: 'alim', date: '2026-11-29', payee: 'Inbal', importedPayee: 'Inbal' })];
@@ -547,7 +439,7 @@ test('M3: a visible category that is not in the plan cannot be a move source', a
 test('status: a transfer due before the plan was first saved is never reported missing', async () => {
   files.savePlan({ ...plan, incomeSources: [{ name: 'Alimony', payee: 'Inbal', expectedAmount: 5000, expectedDay: 29, fixedTransfer: true }] } as never,
     { by: 't', why: 't' }, new Date('2026-12-04T08:00:00Z'));
-  clock = new Date('2026-12-05T09:00:00Z');
+  setNow(new Date('2026-12-05T09:00:00Z'));
   expect((await statusOf()).events.map((e: any) => e.id)).not.toContain('transfer:2026-11');
 });
 
@@ -562,7 +454,7 @@ test('status: planSince is the Jerusalem date of the first save (22:30Z is alrea
   // Saved Dec 4 22:30Z = Dec 5 00:30 in Jerusalem. A November transfer (expectedDay 31) was due Dec 4: before the plan.
   files.savePlan({ ...plan, incomeSources: [{ name: 'Alimony', payee: 'Inbal', expectedAmount: 5000, expectedDay: 31, fixedTransfer: true }] } as never,
     { by: 't', why: 't' }, new Date('2026-12-04T22:30:00Z'));
-  clock = new Date('2026-12-06T09:00:00Z');
+  setNow(new Date('2026-12-06T09:00:00Z'));
   expect((await statusOf()).events.map((e: any) => e.id)).not.toContain('transfer:2026-11');
 });
 
@@ -575,7 +467,7 @@ test('status: a far-past month is read with separate queries per range, not one 
 
 test('status: a past month reads 3+ days into the next month, so a transfer landing Nov 1 settles October', async () => {
   savePlanOf({ ...plan, incomeSources: [{ name: 'Alimony', payee: 'Inbal', expectedAmount: 5000, expectedDay: 29, fixedTransfer: true }] });
-  clock = new Date('2026-12-10T09:00:00Z');
+  setNow(new Date('2026-12-10T09:00:00Z'));
   store.rows = [row({ id: 'nov1', date: '2026-11-01', payee: 'Inbal', importedPayee: 'Inbal' })];
   expect((await statusOf('/status?month=2026-10')).events.map((e: any) => e.id)).not.toContain('transfer:2026-10');
 });
@@ -583,7 +475,7 @@ test('status: a past month reads 3+ days into the next month, so a transfer land
 test('status: a past month also reads the month before it, so a claimed grace row does not fake a missing transfer', async () => {
   // expectedDay 5. October has its own row (Oct 5), so the Nov 2 row is November's; without the October rows it looked like a late October one.
   savePlanOf({ ...plan, incomeSources: [{ name: 'Alimony', payee: 'Inbal', expectedAmount: 5000, expectedDay: 5, fixedTransfer: true }] });
-  clock = new Date('2026-12-09T09:00:00Z');
+  setNow(new Date('2026-12-09T09:00:00Z'));
   store.rows = [
     row({ id: 'oct5', date: '2026-10-05', payee: 'Inbal', importedPayee: 'Inbal' }),
     row({ id: 'nov2', date: '2026-11-02', payee: 'Inbal', importedPayee: 'Inbal' }),
