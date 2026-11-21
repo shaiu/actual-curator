@@ -4,7 +4,7 @@ import { BudgetWriteUnconfirmedError } from '../actual/store.ts';
 import { addMonths, currentMonth, daysInMonth, jerusalemToday, previousMonth } from '../budget/dates.ts';
 import { buildEvents, type BudgetEvent, type IncomeRow, incomeStatus } from '../budget/events.ts';
 import { type Move, pace, type PaceLine, suggestMoves } from '../budget/pace.ts';
-import { availableFor, checkPlan, PlanError, propose, proposalId } from '../budget/propose.ts';
+import { availableFor, checkAccounts, checkPlan, fundingShortfall, PlanError, propose, proposalId } from '../budget/propose.ts';
 import { type MonthSnapshot, type Plan, planSchema } from '../budget/types.ts';
 import { ApiError } from './errors.ts';
 import { money } from './format.ts';
@@ -77,6 +77,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const plan = needPlan();
     const snap = await store.budgetMonth(month);
     checkPlan(plan, snap);
+    if (plan.incomeSources.some(s => s.account !== undefined)) checkAccounts(plan, await store.accounts());
     return { plan, snap };
   };
   /** Deposit candidates from on-budget accounts only: income "landed" means money in the budget. */
@@ -135,6 +136,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const bad = planAmounts(b.plan).filter(x => !hasAgorotPrecision(x));
     if (bad.length) throw new ApiError(400, 'bad_request', `plan amounts need at most 2 decimals: ${bad.join(', ')}`);
     checkPlan(b.plan, await store.budgetMonth(currentMonth(now())));
+    if (b.plan.incomeSources.some(s => s.account !== undefined)) checkAccounts(b.plan, await store.accounts());
     budget.savePlan(b.plan, { by: b.by, why: b.why }, now());
     return c.json({ plan: b.plan });
   });
@@ -155,8 +157,9 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const excludedSpent = (prev?.categories ?? []).filter(x => excluded.has(x.id)).reduce((s, x) => s - x.spent, 0);
     return c.json({
       proposal: { ...p, available: money(p.available), proposed: money(p.proposed), remaining: money(p.remaining),
+        coversOverspend: money(p.coversOverspend),
         lines: p.lines.map(l => ({ ...l, planned: money(l.planned), budgeted: money(l.budgeted),
-          propose: money(l.propose), unfunded: money(l.unfunded) })) },
+          propose: money(l.propose), unfunded: money(l.unfunded), covers: money(l.covers) })) },
       landed: landed.map(l => ({ source: l.source.name, amount: money(l.row.amount), date: l.row.date })),
       expected: expected.map(s => ({ source: s.name, expectedDay: s.expectedDay })),
       excludedSpentLastMonth: money(excludedSpent),
@@ -183,9 +186,10 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     }
     const added = Object.entries(b.amounts).map(([id, shekel]) => ({ cat: byId.get(id)!, added: toMinor(shekel) }));
     const total = added.reduce((s, a) => s + a.added, 0);
-    const available = availableFor(snap, later);
-    if (total > available) {
-      throw new ApiError(400, 'over_available', `adds ${money(total).formatted} but only ${money(available).formatted} is available`);
+    const short = fundingShortfall(snap, later, added);
+    if (short.now > 0 || short.later > 0) {
+      throw new ApiError(400, 'over_available', `adds ${money(total).formatted} but only ${money(availableFor(snap, later)).formatted} is available`
+        + ` beyond covering this month's overspending (short ${money(Math.max(short.now, short.later)).formatted})`);
     }
     const absolute = Object.fromEntries(added.map(a => [a.cat.id, a.cat.budgeted + a.added]));
     const entry = { op: 'apply', month: b.month, approvedBy: b.approvedBy, amounts: absolute, added: Object.fromEntries(added.map(a => [a.cat.id, a.added])) };
