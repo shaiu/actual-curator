@@ -11,6 +11,7 @@ import { accessVerifier } from './http/access.ts';
 import { BudgetFiles } from './budget/plan-store.ts';
 import { createApp } from './http/app.ts';
 import { exclusionResolver } from './http/exclusions.ts';
+import { createBudgetPage } from './http/budget-page.ts';
 import { createMoneyPage } from './http/money.ts';
 import { DecisionLog } from './log.ts';
 import { createNotifier } from './notify.ts';
@@ -54,10 +55,17 @@ async function main() {
   const page = createMoneyPage({ store, exclusions: exclusionResolver(store, cfg.reportExclude), watch: cfg.moneyWatch,
     pending: async () => (await store.transactions({ from: '1970-01-01', to: '9999-12-31', tag: 'review', limit: 10_000 })).length,
     ...(cfg.access ? { verify: accessVerifier(cfg.access) } : {}) });
-  // /money is its own small app; everything else is the API, with its JSON 404s.
-  const fetch = (req: Request) => (new URL(req.url).pathname === '/money' ? page.fetch(req) : app.fetch(req));
+  // /budget reads the API in-process with the API's own token, so it shows exactly what the advisor reads.
+  const budgetPage = createBudgetPage({
+    api: async path => app.fetch(new Request(`http://curator.local${path}`, { headers: { authorization: `Bearer ${cfg.token}` } })),
+    ...(cfg.access ? { verify: accessVerifier(cfg.access) } : {}) });
+  // /money and /budget are their own small apps; everything else is the API, with its JSON 404s.
+  const fetch = (req: Request) => {
+    const path = new URL(req.url).pathname;
+    return path === '/money' ? page.fetch(req) : path === '/budget' ? budgetPage.fetch(req) : app.fetch(req);
+  };
   const server = serve({ fetch, port: cfg.port, hostname: '0.0.0.0' },
-    info => console.log(`HTTP API on :${info.port}/v1${cfg.access ? ' · /money behind Cloudflare Access' : ''}`));
+    info => console.log(`HTTP API on :${info.port}/v1${cfg.access ? ' · /money and /budget behind Cloudflare Access' : ''}`));
 
   let closing = false;
   const shutdown = async (signal: string) => {

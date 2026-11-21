@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 — a budget page
+
+- `GET /budget` (`src/http/budget-page.ts`): a read-only page over `GET /v1/budget/status` and
+  `GET /v1/budget/propose`, called in-process through the API app with its own bearer token, so it
+  shows exactly the JSON the advisor reads and holds no budget math of its own. Same Access check,
+  headers (no-store, `default-src 'none'`) and language cookie pattern as `/money`. A past month shows
+  status only; a month with no plan says so.
+- Layout from reference apps: one "left for day-to-day" number with a pace line (Monarch flex,
+  PocketGuard leftover), a bar per variable line with today's expected mark (Copilot), and
+  over/left per line coloured by `status` (YNAB).
+
 ## 0.2.1 — plan accounts are checked; overspending cover is not double-counted
 
 - `PUT /v1/budget/plan` and every route that loads the plan answer 409 `stale_plan` when an income
