@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4 — clearer wording
+
+- The unplanned hint named "next month", which read as if November's payments were charged to
+  December (Shai, 2026-11-22). It now names the viewed month and says its free money is overstated
+  until the overspend is covered.
+
 ## 0.3.3 — what the plan does not track
 
 - `GET /v1/budget/status` adds `unplanned` and `excluded`: visible expense categories with spending or a

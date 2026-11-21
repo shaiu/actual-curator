@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4
+
+- `/budget`: the "Not in the plan" note now says what happened: the money was paid this month without
+  a budget, so until it is covered this month's free money looks bigger than it is.
+
 ## 0.3.3
 
 - `/budget` shows a "Not in the plan" section: categories with spending this month that the plan does

@@ -107,6 +107,7 @@ test('categories outside the plan get their own section; excluded ones are colla
   v.status.excluded = [{ categoryId: 'biz', label: "Needs / Inbal's Business Stuff", spent: mny(15766), balance: mny(-15766) }];
   const html = renderBudget(v, 'en');
   expect(html).toContain('Not in the plan');
+  expect(html).toContain("Paid in November without a budget. Until it is covered, November&#39;s free money looks bigger");
   expect(html).toContain('<bdi>🚗 Auto maintenance</bdi>');
   expect(html).toContain('₪2,922 over');
   expect(html).toMatch(/<details><summary>Left out by decision \(1\)<\/summary>/);
