@@ -108,7 +108,9 @@ export function propose(plan: Plan, snap: MonthSnapshot, later: number[] = []): 
   let free = later.length ? Math.min(...later) : Infinity;
   const lines: ProposalLine[] = entries.map(({ c, cat }) => {
     const planned = plannedAmount(c, cat, snap.month);
-    const need = Math.max(0, planned - cat.budgeted);
+    // Up to the plan, and never less than what brings an overspent line back to zero: the overspend is
+    // money already gone, and leaving it uncovered only moves it into next month's To budget.
+    const need = Math.max(0, planned - cat.budgeted, -cat.balance);
     const cover = overspendOf(cat);
     const give = Math.max(0, Math.min(need, now, cover + Math.max(0, free)));
     const covers = Math.min(give, cover);

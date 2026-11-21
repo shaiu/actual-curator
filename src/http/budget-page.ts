@@ -69,7 +69,9 @@ const T = {
     income: 'הכנסות', landed: 'נכנס', expected: (d: number) => `צפוי בערך ב-${d} לחודש`,
     moves: 'היועץ עשוי להציע העברה',
     noPlan: 'עוד אין תוכנית תקציב. היא נבנית בשיחה עם היועץ בקבוצת כספים.', error: 'לא הצלחתי לקרוא את התקציב:',
-    legend: 'הקו האנכי: כמה היה צפוי לצאת עד היום.',
+    legend: 'הקו האנכי: כמה היה צפוי לצאת עד היום. אדום: נגמר או בחריגה. כתום: מוציאים מהר מהחודש.',
+    freeHint: 'כסף שנכנס ולא שויך לשום קו. הוא עובר לחודש הבא ומשמש כרית.',
+    leftHint: 'מה שעוד נשאר בקווי ההוצאות השוטפות, כולל יתרות מחודשים קודמים.',
   },
   en: {
     title: 'Our budget', other: 'עברית', dayOf: (d: number, n: number) => `Day ${d} of ${n}`, whole: 'Whole month',
@@ -84,7 +86,9 @@ const T = {
     income: 'Income', landed: 'Landed', expected: (d: number) => `expected around the ${d}th`,
     moves: 'The advisor may suggest a move',
     noPlan: 'No budget plan yet. It is built in a conversation with the advisor in the finance group.', error: 'Could not read the budget:',
-    legend: 'The vertical line: what was expected to be spent by today.',
+    legend: 'The vertical line: what was expected to be spent by today. Red: used up or over. Amber: spending faster than the month.',
+    freeHint: 'Money that came in and is not assigned to any line. It carries into next month as a cushion.',
+    leftHint: 'What is still in the day-to-day lines, including balances carried from earlier months.',
   },
 };
 
@@ -128,8 +132,9 @@ export function renderBudget(v: BudgetPageData, lang: Lang): string {
     const free = v.proposal?.proposal.available.amount;
     body.push(`<section class="hero"><div class="label">${esc(t.leftDaily)}</div>
 <div class="big ${left < 0 ? 'neg' : ''}">${ils(left)}</div><div class="sub">${esc(t.ofBudget(ils(dHeld)))}</div>
+<p class="hint">${esc(t.leftHint)}</p>
 ${paceTxt ? `<p class="pace ${current && gap >= 10_000 ? 'warn' : 'good'}">${esc(paceTxt)}</p>` : ''}
-${free !== undefined ? `<div class="chip ${free < 0 ? 'neg' : ''}">${esc(t.free)}: <b>${ils(free)}</b></div>` : ''}</section>`);
+${free !== undefined ? `<div class="chip ${free < 0 ? 'neg' : ''}">${esc(t.free)}: <b>${ils(free)}</b></div><p class="hint">${esc(t.freeHint)}</p>` : ''}</section>`);
 
     // Day-to-day: a bar per line, spent against budgeted, with today's expected mark (Copilot-style pace).
     if (daily.length) {
@@ -213,7 +218,7 @@ ul{list-style:none;margin:0;padding:0}li{padding:8px 0}.row{display:flex;justify
 .name{font-weight:600}.bar{position:relative;height:8px;background:var(--line);border-radius:4px;margin-top:5px}
 .bar i{display:block;height:100%;background:var(--bar);border-radius:4px}.bar em{position:absolute;top:-3px;width:2px;height:14px;background:var(--ink);opacity:.55}
 li.watch .bar i{background:var(--warn)}li.off .bar i{background:var(--off)}
-.legend{color:var(--mute);font-size:12px;margin:6px 0 0}
+.legend{color:var(--mute);font-size:12px;margin:6px 0 0}.hint{color:var(--mute);font-size:12px;margin:6px 0 0}
 table{width:100%;border-collapse:collapse}td{padding:7px 0;vertical-align:baseline}td.n{text-align:end;font-variant-numeric:tabular-nums;white-space:nowrap;padding-inline-start:10px}
 details summary{cursor:pointer;color:var(--bar);padding:8px 0 0}
 .proposal .row{margin-bottom:6px}

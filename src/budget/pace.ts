@@ -58,8 +58,13 @@ export function pace(plan: Plan, snap: MonthSnapshot, today: string): PaceLine[]
 
 const TEN_SHEKEL = 1000;
 
-/** `today` is unused: slack comes from each line's expectedByToday, which pace() computed for the snapshot's own month. Kept for the declared interface. */
-export function suggestMoves(plan: Plan, lines: PaceLine[], _today: string): Move[] {
+/**
+ * `today` is unused: slack comes from each line's expectedByToday, which pace() computed for the snapshot's own month.
+ * `free` is money with no job yet (the proposal's `available`): it covers shortfalls first, and a move is suggested only
+ * for what it cannot cover. Taking from another line while money sits unassigned was the 2026-11-21 confusion.
+ */
+export function suggestMoves(plan: Plan, lines: PaceLine[], _today: string, free = 0): Move[] {
+  let unassigned = Math.max(0, free);
   const protectedIds = new Set(plan.categories.filter((c) => c.protected).map((c) => c.categoryId));
   const slack = new Map<string, number>();
   for (const l of lines) {
@@ -72,6 +77,9 @@ export function suggestMoves(plan: Plan, lines: PaceLine[], _today: string): Mov
   for (const off of lines.filter((l) => l.status === 'off')) {
     const carryIn = off.balance - off.budgeted + off.spent;
     let rest = Math.max(-off.balance, off.projected - off.budgeted - Math.max(0, carryIn));
+    const fromFree = Math.min(unassigned, Math.max(0, rest));
+    unassigned -= fromFree;
+    rest -= fromFree;
     const sources = [...slack].filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1] || cmp(a[0], b[0]));
     for (const [id, s] of sources) {
       if (rest <= 0) break;

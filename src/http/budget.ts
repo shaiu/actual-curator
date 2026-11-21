@@ -244,7 +244,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const { plan, snap } = await load(month);
     const today = jerusalemToday(now());
     const lines = pace(plan, snap, today);
-    const moves = month < currentMonth(now()) ? [] : suggestMoves(plan, lines, today);
+    const moves = month < currentMonth(now()) ? [] : suggestMoves(plan, lines, today, availableFor(snap, await laterToBudgets(month)));
     // Income events look 35 days back from today, plus the queried month, plus always the previous
     // month (for the transfer check). Row ids are the event ids, so overlapping windows never duplicate an event.
     // A past month also reads the first days of the next one: a late transfer landing there still settles it.

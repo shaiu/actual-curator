@@ -68,6 +68,7 @@ test('status: a setaside and a variable on watch, a variable off, a suggested mo
   s.categories.push(cat('trip', 'Wants / Trip', 20000, 0), cat('dine', 'Wants / Dining', 100000, -90000));
   s.categories.find(c => c.id === 'groc')!.spent = -105000; // groceries overspent: off
   s.categories.find(c => c.id === 'groc')!.balance = -5000;
+  s.toBudget = 0; // no free money: a move is the only way to cover the overspend
   ctx.store.snaps.set('2026-11', s);
   ctx.store.rows = [row({}), row({ id: 'rv', date: '2026-11-15', amount: -500, notes: '#review' })];
   ctx.setNow(STATUS_NOW);
