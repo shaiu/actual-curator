@@ -73,7 +73,7 @@ const T = {
     moves: 'היועץ עשוי להציע העברה',
     noPlan: 'עוד אין תוכנית תקציב. היא נבנית בשיחה עם היועץ בקבוצת כספים.', error: 'לא הצלחתי לקרוא את התקציב:',
     legend: 'הקו האנכי: כמה היה צפוי לצאת עד היום. אדום: נגמר או בחריגה. כתום: מוציאים מהר מהחודש.',
-    unplanned: 'לא בתוכנית', unplannedHint: 'כסף שיצא בקטגוריות שהתוכנית לא עוקבת אחריהן. חריגה כאן יורדת מהחודש הבא. כדי לעקוב ולכסות, בקשו מהיועץ להוסיף אותן לתוכנית.',
+    unplanned: 'לא בתוכנית', unplannedHint: (m: string) => `שולם ב${m} בלי תקציב. עד שזה מכוסה, הכסף הפנוי של ${m} נראה גדול ממה שהוא. כדי לכסות, בקשו מהיועץ להוסיף את הקטגוריות לתוכנית.`,
     excludedTitle: (n: number) => `מחוץ לתוכנית בהחלטה (${n})`, spentBal: (s: string, b: string) => `הוצא ${s} · יתרה ${b}`,
     freeHint: 'כסף שנכנס ולא שויך לשום קו. הוא עובר לחודש הבא ומשמש כרית.',
     leftHint: 'מה שעוד נשאר בקווי ההוצאות השוטפות, כולל יתרות מחודשים קודמים.',
@@ -92,7 +92,7 @@ const T = {
     moves: 'The advisor may suggest a move',
     noPlan: 'No budget plan yet. It is built in a conversation with the advisor in the finance group.', error: 'Could not read the budget:',
     legend: 'The vertical line: what was expected to be spent by today. Red: used up or over. Amber: spending faster than the month.',
-    unplanned: 'Not in the plan', unplannedHint: 'Money spent in categories the plan does not track. Overspending here comes out of next month. To track and cover them, ask the advisor to add them to the plan.',
+    unplanned: 'Not in the plan', unplannedHint: (m: string) => `Paid in ${m} without a budget. Until it is covered, ${m}'s free money looks bigger than it is. To cover it, ask the advisor to add these categories to the plan.`,
     excludedTitle: (n: number) => `Left out by decision (${n})`, spentBal: (s: string, b: string) => `spent ${s} · balance ${b}`,
     freeHint: 'Money that came in and is not assigned to any line. It carries into next month as a cushion.',
     leftHint: 'What is still in the day-to-day lines, including balances carried from earlier months.',
@@ -171,7 +171,7 @@ ${current ? `<p class="legend">${esc(t.legend)}</p>` : ''}</section>`);
       body.push(`<section class="unplanned"><h2>${esc(t.unplanned)}</h2><table>${unplanned.map(l =>
         `<tr><td>${nm(l.label)}</td><td class="n">${ils(l.spent.amount)}</td><td class="n ${l.balance.amount < 0 ? 'off' : 'mute'}">${l.balance.amount < 0
           ? esc(t.over(ils(-l.balance.amount))) : esc(t.left(ils(l.balance.amount)))}</td></tr>`).join('')}</table>
-<p class="hint">${esc(t.unplannedHint)}</p>
+<p class="hint">${esc(t.unplannedHint(shortMonth(v.month, lang)))}</p>
 ${excluded.length ? `<details><summary>${esc(t.excludedTitle(excluded.length))}</summary><table>${excluded.map(offRow).join('')}</table></details>` : ''}</section>`);
     } else if (excluded.length) {
       body.push(`<section><details><summary>${esc(t.excludedTitle(excluded.length))}</summary><table>${excluded.map(offRow).join('')}</table></details></section>`);
