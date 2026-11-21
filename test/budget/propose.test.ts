@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { planSchema, type CategoryMonth, type MonthSnapshot, type PlanInput } from '../../src/budget/types.ts';
-import { PlanError, checkPlan, plannedAmount, propose, proposalId } from '../../src/budget/propose.ts';
+import { PlanError, checkPlan, fundingShortfall, plannedAmount, propose, proposalId } from '../../src/budget/propose.ts';
 
 const cat = (id: string, o: Partial<CategoryMonth> = {}): CategoryMonth => ({
   id, label: id, hidden: false, isIncome: false, budgeted: 0, spent: 0, balance: 0, ...o,
@@ -157,5 +157,50 @@ describe('available across later months (Actual carry-over)', () => {
     expect(proposalId(s, [100, 200, 300])).not.toBe(id);
     expect(proposalId(s, [100, 200])).toBe(id);
     expect(propose(p, s, [100, 200]).proposalId).toBe(id);
+  });
+});
+
+describe('propose: overspending already lost by later months', () => {
+  const p = plan([
+    { categoryId: 'rent', kind: 'fixed', priority: 1, amount: 8500 },
+    { categoryId: 'food', kind: 'variable', priority: 2, amount: 5000 },
+  ]);
+  it('covering an overspend costs later months nothing (the 2026-11 case)', () => {
+    // rent spent 8,500 with nothing budgeted: next month already lost it, so later = 1,000 net.
+    const s = snap(1000000, [cat('rent', { spent: -850000, balance: -850000 }), cat('food')], '2026-11');
+    const r = propose(p, s, [100000]);
+    expect(r.available).toBe(100000);
+    expect(r.lines[0]).toMatchObject({ propose: 850000, covers: 850000 });
+    expect(r.lines[1]).toMatchObject({ propose: 100000, covers: 0, unfunded: 400000 });
+    expect(r.coversOverspend).toBe(850000);
+    expect(r.proposed - r.coversOverspend).toBe(r.available);
+    expect(r.remaining).toBe(0);
+  });
+  it('a carryover category keeps its overspend, so covering it is ordinary spending', () => {
+    const s = snap(1000000, [cat('rent', { balance: -850000, carryover: true }), cat('food')], '2026-11');
+    const r = propose(p, s, [100000]);
+    expect(r.lines[0]).toMatchObject({ propose: 100000, covers: 0 });
+    expect(r.coversOverspend).toBe(0);
+  });
+  it('this month\'s To budget still caps everything', () => {
+    const s = snap(300000, [cat('rent', { balance: -850000 }), cat('food')], '2026-11');
+    expect(propose(p, s, [500000]).lines.map((l) => l.propose)).toEqual([300000, 0]);
+  });
+  it('covers an overspend even when later months are negative', () => {
+    const s = snap(1000000, [cat('rent', { balance: -850000 }), cat('food')], '2026-11');
+    const r = propose(p, s, [-1500000]);
+    expect(r.lines.map((l) => l.propose)).toEqual([850000, 0]);
+  });
+});
+
+describe('fundingShortfall (the apply check)', () => {
+  const rent = cat('rent', { balance: -850000 }), food = cat('food');
+  const s = snap(1000000, [rent, food], '2026-11');
+  it('allows covering an overspend beyond min(later)', () => {
+    expect(fundingShortfall(s, [100000], [{ cat: rent, added: 850000 }, { cat: food, added: 100000 }])).toEqual({ now: 0, later: 0 });
+  });
+  it('reports what new money exceeds', () => {
+    expect(fundingShortfall(s, [100000], [{ cat: rent, added: 850000 }, { cat: food, added: 100001 }])).toEqual({ now: 0, later: 1 });
+    expect(fundingShortfall(s, [5000000], [{ cat: food, added: 1000001 }])).toEqual({ now: 1, later: 0 });
   });
 });

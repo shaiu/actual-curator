@@ -122,7 +122,7 @@ export class ActualStore {
       for (const c of g.categories ?? []) {
         categories.push({
           id: c.id as string, label: categoryLabel(g, c),
-          hidden: Boolean(c.hidden || g.hidden), isIncome: Boolean(g.is_income),
+          hidden: Boolean(c.hidden || g.hidden), isIncome: Boolean(g.is_income), carryover: Boolean(c.carryover),
           budgeted: (c.budgeted as number) ?? 0, spent: (c.spent as number) ?? 0, balance: (c.balance as number) ?? 0,
         });
       }
@@ -153,8 +153,8 @@ export class ActualStore {
     });
   }
 
-  async accounts(): Promise<{ id: string; name: string; offbudget: boolean }[]> {
-    return (await api.getAccounts()).map(a => ({ id: a.id, name: a.name, offbudget: Boolean(a.offbudget) }));
+  async accounts(): Promise<{ id: string; name: string; offbudget: boolean; closed?: boolean }[]> {
+    return (await api.getAccounts()).map(a => ({ id: a.id, name: a.name, offbudget: Boolean(a.offbudget), closed: Boolean(a.closed) }));
   }
 
   /** Rows the curator may touch, minus the `#auto` check (the caller does that). */

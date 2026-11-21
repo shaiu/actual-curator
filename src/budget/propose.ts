@@ -23,13 +23,43 @@ export function checkPlan(plan: Plan, snap: MonthSnapshot): void {
   }
 }
 
+/** Throws PlanError('stale_plan') naming every income source whose `account` is not an open on-budget account id. */
+export function checkAccounts(plan: Plan, accounts: { id: string; name: string; offbudget: boolean; closed?: boolean }[]): void {
+  const ok = new Set(accounts.filter((a) => !a.offbudget && !a.closed).map((a) => a.id));
+  const bad = plan.incomeSources.filter((s) => s.account !== undefined && !ok.has(s.account));
+  if (bad.length > 0) {
+    const ids = accounts.filter((a) => ok.has(a.id)).map((a) => `${a.name}=${a.id}`).join(', ');
+    throw new PlanError('stale_plan',
+      `income source account must be an on-budget account id, got ${bad.map((s) => `${s.name}: ${s.account}`).join('; ')}. Ids: ${ids}`);
+  }
+}
+
 export type ProposalLine = {
   categoryId: string; label: string; kind: Kind; priority: number;
-  planned: number; budgeted: number; propose: number; unfunded: number; // minor
+  /** `covers`: the part of `propose` that funds this month's overspending, which later months already lost. */
+  planned: number; budgeted: number; propose: number; unfunded: number; covers: number; // minor
 };
 export type Proposal = {
-  month: string; proposalId: string; available: number; proposed: number; remaining: number; lines: ProposalLine[];
+  month: string; proposalId: string; available: number; proposed: number; remaining: number;
+  /** The part of `proposed` that covers overspending; it is not taken from `available`. */
+  coversOverspend: number; lines: ProposalLine[];
 };
+
+/** This month's overspending in a category that next month's To budget already lost (none with carryover). */
+export const overspendOf = (cat: CategoryMonth): number => (cat.balance < 0 && !cat.carryover ? -cat.balance : 0);
+
+/**
+ * Whether adding `adds` to `snap.month` double-spends. Every shekel comes out of this month's To budget. A later
+ * month already lost this month's uncovered overspending, so covering it costs that month nothing; only the rest
+ * comes out of `min(later)`. Returns the shortfall of each budget (0 when it fits).
+ */
+export function fundingShortfall(snap: MonthSnapshot, later: number[], adds: { cat: CategoryMonth; added: number }[]):
+  { now: number; later: number } {
+  const total = adds.reduce((s, a) => s + a.added, 0);
+  const fresh = adds.reduce((s, a) => s + Math.max(0, a.added - Math.min(Math.max(0, a.added), overspendOf(a.cat))), 0);
+  const freeLater = later.length ? Math.min(...later) : Infinity;
+  return { now: Math.max(0, total - snap.toBudget), later: Math.max(0, fresh - Math.max(0, freeLater)) };
+}
 
 /** The month's planned amount for one plan category (minor units); used by propose and by pace. */
 export function plannedAmount(c: PlanCategory, cat: CategoryMonth, month: string): number {
@@ -73,19 +103,25 @@ export function propose(plan: Plan, snap: MonthSnapshot, later: number[] = []): 
     .sort((x, y) => x.c.priority - y.c.priority || cmp(x.cat.label, y.cat.label));
 
   const available = availableFor(snap, later);
-  let remaining = available;
+  // Two budgets: this month's To budget pays for everything; later months pay only for what does not cover overspending.
+  let now = snap.toBudget;
+  let free = later.length ? Math.min(...later) : Infinity;
   const lines: ProposalLine[] = entries.map(({ c, cat }) => {
     const planned = plannedAmount(c, cat, snap.month);
     const need = Math.max(0, planned - cat.budgeted);
-    const give = Math.min(need, Math.max(0, remaining));
-    remaining -= give;
+    const cover = overspendOf(cat);
+    const give = Math.max(0, Math.min(need, now, cover + Math.max(0, free)));
+    const covers = Math.min(give, cover);
+    now -= give;
+    free -= give - covers;
     return {
       categoryId: c.categoryId, label: cat.label, kind: c.kind, priority: c.priority,
-      planned, budgeted: cat.budgeted, propose: give, unfunded: need - give,
+      planned, budgeted: cat.budgeted, propose: give, unfunded: need - give, covers,
     };
   });
   return {
     month: snap.month, proposalId: proposalId(snap, later), available,
-    proposed: lines.reduce((s, l) => s + l.propose, 0), remaining, lines,
+    proposed: lines.reduce((s, l) => s + l.propose, 0), remaining: Math.min(now, free),
+    coversOverspend: lines.reduce((s, l) => s + l.covers, 0), lines,
   };
 }

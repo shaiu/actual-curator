@@ -17,6 +17,10 @@
         "amount": 220000,
         "formatted": "2200.00"
       },
+      "coversOverspend": {
+        "amount": 0,
+        "formatted": "0.00"
+      },
       "lines": [
         {
           "categoryId": "rent",
@@ -36,6 +40,10 @@
             "formatted": "2800.00"
           },
           "unfunded": {
+            "amount": 0,
+            "formatted": "0.00"
+          },
+          "covers": {
             "amount": 0,
             "formatted": "0.00"
           }
@@ -60,6 +68,10 @@
           "unfunded": {
             "amount": 0,
             "formatted": "0.00"
+          },
+          "covers": {
+            "amount": 0,
+            "formatted": "0.00"
           }
         },
         {
@@ -82,6 +94,10 @@
           "unfunded": {
             "amount": 0,
             "formatted": "0.00"
+          },
+          "covers": {
+            "amount": 0,
+            "formatted": "0.00"
           }
         },
         {
@@ -102,6 +118,10 @@
             "formatted": "0.00"
           },
           "unfunded": {
+            "amount": 0,
+            "formatted": "0.00"
+          },
+          "covers": {
             "amount": 0,
             "formatted": "0.00"
           }

@@ -62,7 +62,7 @@ export class FakeStore implements ApiStore {
   }
   async budgetMonths() { return [...this.months]; }
   accountCalls = 0;
-  async accounts() { this.accountCalls++; return [{ id: 'a', name: 'Bank', offbudget: false }, { id: 'off', name: 'Savings', offbudget: true }]; }
+  async accounts() { this.accountCalls++; return [{ id: 'a', name: 'Bank', offbudget: false }, { id: 'off', name: 'Savings', offbudget: true }, { id: 'hap', name: 'Hapoalim', offbudget: false }]; }
   async categories() { return [] as CategoryOption[]; }
   async transactions(q: { from: string; to: string; tag?: string; limit: number }) {
     this.txQueries.push(q);

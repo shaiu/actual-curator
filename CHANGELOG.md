@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1 — plan accounts are checked; overspending cover is not double-counted
+
+- `PUT /v1/budget/plan` and every route that loads the plan answer 409 `stale_plan` when an income
+  source's `account` is not an open on-budget account id. The message lists `name=id` for each valid
+  account. Measured 2026-11-21: a plan saved with `account: "Hapoalim"` matched no deposit and
+  `landed` stayed `[]` with no error.
+- `propose` and `apply` keep two budgets. Every shekel comes out of this month's To budget. Only the
+  part that does not cover this month's overspending comes out of `min(later To budget)`, because a
+  later month already lost that overspending. New fields: `proposal.coversOverspend` and
+  `lines[].covers`; `proposed - coversOverspend <= available`. A carryover category is not covered
+  this way: its overspend never left next month's To budget. Measured 2026-11-21: a 29,275.30
+  proposal left 20,865.22 free after apply, because about 20,865 of it covered spent lines.
+- `CategoryMonth.carryover` and `accounts()[].closed` are read from Actual.
+
 ## 0.2.0 — a monthly envelope budget
 
 - Seven routes under `/v1/budget` run the monthly envelope budget: `GET`/`PUT /plan`, `GET /propose`,

@@ -482,3 +482,15 @@ test('status: a past month also reads the month before it, so a claimed grace ro
   ];
   expect((await statusOf('/status?month=2026-11')).events.map((e: any) => e.id)).not.toContain('transfer:2026-11');
 });
+
+test('plan: an income source account that is a name, not an on-budget id, is refused on save and on load', async () => {
+  const bad = { ...plan, incomeSources: [{ name: 'Salary', payee: 'Employer', expectedAmount: 15000, expectedDay: 1, account: 'Hapoalim' }] };
+  const r = await put('/plan', { plan: bad, by: 't', why: 't' });
+  expect(r.status).toBe(409);
+  const msg = ((await r.json()) as any).error.message as string;
+  expect(msg).toContain('Salary: Hapoalim');
+  expect(msg).toContain('Hapoalim=hap');
+  expect((await put('/plan', { plan: { ...bad, incomeSources: [{ ...bad.incomeSources[0], account: 'off' }] }, by: 't', why: 't' })).status).toBe(409);
+  savePlanOf(bad);
+  expect(await errCode(await get('/propose'))).toBe('stale_plan');
+});

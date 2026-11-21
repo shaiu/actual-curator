@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- A budget plan whose income source names an account by its name, or by an account that is off
+  budget or closed, is refused with the list of valid account ids. Before, such a source never
+  matched any deposit, with no error.
+- A proposal no longer counts money that covers this month's overspending against what is free for
+  later months, so one approval funds the month fully instead of leaving money unassigned.
+
 ## 0.2.0
 
 - New monthly budget: the app can now work out how to fund each category for the month, apply it in

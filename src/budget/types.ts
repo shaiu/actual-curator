@@ -65,6 +65,8 @@ export type Thresholds = Plan['thresholds'];
 /** All amounts in minor units. */
 export type CategoryMonth = {
   id: string; label: string; hidden: boolean; isIncome: boolean;
+  /** Rollover overspending: a negative balance stays in the category instead of leaving next month's To budget. */
+  carryover?: boolean;
   budgeted: number; spent: number /* <= 0 */; balance: number;
 };
 export type MonthSnapshot = { month: string; toBudget: number; categories: CategoryMonth[] };
