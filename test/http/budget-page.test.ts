@@ -1,0 +1,73 @@
+import { expect, test } from 'vitest';
+import { createBudgetPage, loadBudgetPage, renderBudget } from '../../src/http/budget-page.ts';
+import { PLAN_SAVED, makeBudgetApp, plan, row } from '../helpers/budget-http.ts';
+
+const auth = { authorization: 'Bearer secret' };
+const setup = (withPlan = true) => {
+  const h = makeBudgetApp();
+  if (withPlan) h.files.savePlan(plan as never, { by: 't', why: 't' }, PLAN_SAVED);
+  h.store.rows = [row({ id: 'pay' })];
+  const api = async (path: string) => h.app.request(path, { headers: auth });
+  return { ...h, api, now: new Date('2026-11-20T09:00:00Z') };
+};
+const ok = async (t: string) => (t === 'good' ? 'me@example.com' : null);
+const pageOf = (s: ReturnType<typeof setup>, verify?: typeof ok) => createBudgetPage({ api: s.api, verify, now: () => s.now });
+const signed = { headers: { 'cf-access-jwt-assertion': 'good' } };
+
+test('loads the same status and proposal the advisor reads', async () => {
+  const s = setup();
+  const v = await loadBudgetPage(s.api, { now: s.now });
+  expect(v.error).toBeNull();
+  expect(v.month).toBe('2026-11');
+  const status = await (await s.api('/v1/budget/status?month=2026-11')).json();
+  expect(v.status).toEqual(status);
+  expect(v.proposal?.proposal.available).toEqual({ amount: 500000, formatted: '5000.00' });
+  expect(v.proposal?.landed.map(l => l.source)).toEqual(['Salary']);
+});
+
+test('renders the hero, the lines with a pace mark, fixed bills, the proposal and income, in Hebrew by default', async () => {
+  const s = setup();
+  const html = renderBudget(await loadBudgetPage(s.api, { now: s.now }), 'he');
+  expect(html).toContain('dir="rtl"');
+  expect(html).toContain('נשאר להוצאות שוטפות');
+  // groceries 1,000 + fun 500 + insurance 300 budgeted, 200 spent: 1,600 left.
+  expect(html).toContain('₪1,600');
+  expect(html).toContain('Groceries');
+  expect(html).toMatch(/<em style="inset-inline-start:/);
+  expect(html).toContain('חשבונות קבועים');
+  expect(html).toContain('הצעת היועץ');
+  expect(html).toContain('מוצע ₪2,800'); // rent's proposed amount
+  expect(html).toContain('Salary');
+});
+
+test('a month before any plan says so instead of failing', async () => {
+  const s = setup(false);
+  const v = await loadBudgetPage(s.api, { now: s.now });
+  expect(v.error).toBe('no_plan');
+  expect(renderBudget(v, 'en')).toContain('No budget plan yet');
+});
+
+test('a past month shows status and no proposal', async () => {
+  const s = setup();
+  const v = await loadBudgetPage(s.api, { now: s.now, month: '2026-10' });
+  expect(v.status?.month).toBe('2026-10');
+  expect(v.proposal).toBeNull();
+});
+
+test('the page writes nothing', async () => {
+  const s = setup();
+  await pageOf(s, ok).request('/budget', signed);
+  expect(s.store.writes ?? []).toEqual([]);
+});
+
+test('GET /budget needs a Cloudflare Access sign-in, and does not exist without Access', async () => {
+  const s = setup();
+  expect((await pageOf(s, ok).request('/budget')).status).toBe(403);
+  const r = await pageOf(s, ok).request('/budget?lang=en', signed);
+  expect(r.status).toBe(200);
+  expect(r.headers.get('cache-control')).toBe('no-store');
+  expect(r.headers.get('content-security-policy')).toContain("default-src 'none'");
+  expect(r.headers.get('set-cookie')).toMatch(/budget_lang=en/);
+  expect(await r.text()).toContain('dir="ltr"');
+  expect((await pageOf(s).request('/budget', signed)).status).toBe(404);
+});

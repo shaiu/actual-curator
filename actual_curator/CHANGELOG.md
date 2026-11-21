@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- New page, `/budget`: the month's budget on one phone-sized page, Hebrew by default, behind the same
+  Cloudflare Access sign-in as `/money`. At the top, what is left for day-to-day spending and whether
+  you are ahead of or behind today's pace. Then a bar per day-to-day line with a mark for where
+  spending should be by today, the fixed bills (paid or still due), the advisor's current proposal
+  line by line, and the income that has arrived or is still expected. It only reads; approving a
+  proposal still happens in the finance chat.
+
 ## 0.2.1
 
 - A budget plan whose income source names an account by its name, or by an account that is off
