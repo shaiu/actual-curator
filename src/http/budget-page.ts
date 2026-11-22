@@ -78,6 +78,7 @@ const T = {
     freeHint: 'כסף שנכנס ולא שויך לשום קו. הוא עובר לחודש הבא ומשמש כרית.',
     leftHint: 'מה שעוד נשאר בקווי ההוצאות השוטפות, כולל יתרות מחודשים קודמים.',
     notFound: 'הקטגוריה לא נמצאה.', noTx: 'אין תנועות החודש.', back: 'חזרה לחודש',
+    drift: (r: string, b: string) => `התנועות כאן מסתכמות ב-${r}; התקציב סופר ${b}.`,
     summary: (n: number, payee: string, amt: string) => `${n} תנועות, הגדולה: ${payee} ${amt}`, spent: (a: string) => `הוצא ${a}`,
   },
   en: {
@@ -99,6 +100,7 @@ const T = {
     freeHint: 'Money that came in and is not assigned to any line. It carries into next month as a cushion.',
     leftHint: 'What is still in the day-to-day lines, including balances carried from earlier months.',
     notFound: 'Category not found.', noTx: 'No transactions this month.', back: 'Back to the month',
+    drift: (r: string, b: string) => `These rows add up to ${r}; the budget counts ${b}.`,
     summary: (n: number, payee: string, amt: string) => `${n} transactions, largest: ${payee} ${amt}`, spent: (a: string) => `spent ${a}`,
   },
 };
@@ -262,6 +264,8 @@ ${body.join('\n')}
 export type TxRow = { id: string; date: string; payee: string | null; accountName: string; memo: string; amount: number };
 export type CategoryPageData = {
   month: string; today: string; id: string; label: string; line: StatusLine | null; off: OffPlan | null; rows: TxRow[];
+  /** A read that failed: the page says so instead of showing an empty or partial list. */
+  error: string | null;
 };
 
 export const categoryHref = (month: string, id: string, lang?: Lang) =>
@@ -271,21 +275,35 @@ export const categoryHref = (month: string, id: string, lang?: Lang) =>
 export async function loadCategoryPage(api: ApiCall, o: { now: Date; month?: string; id: string }): Promise<CategoryPageData | null> {
   const today = jerusalemToday(o.now);
   const month = validMonth(o.month) ?? currentMonth(o.now);
-  const get = async <T>(path: string): Promise<T | null> => { const r = await api(path); return r.ok ? await r.json() as T : null; };
+  let error: string | null = null, code: string | null = null;
+  const get = async <T>(path: string): Promise<T | null> => {
+    const r = await api(path);
+    if (r.ok) return await r.json() as T;
+    const j = await r.json().catch(() => ({})) as { error?: { code?: string; message?: string } };
+    code ??= j.error?.code ?? String(r.status);
+    error ??= j.error?.message ?? `HTTP ${r.status}`;
+    return null;
+  };
+  const fail = (label = o.id): CategoryPageData => ({ month, today, id: o.id, label, line: null, off: null, rows: [], error });
   const status = await get<StatusJson>(`/v1/budget/status?month=${month}`);
+  // no_plan is not a failure: the category can still be listed, it just has no line.
+  if (!status && code !== 'no_plan') return fail();
+  if (!status) error = code = null;
   const line = status?.lines.find(l => l.categoryId === o.id) ?? null;
   const off = line ? null : [...(status?.unplanned ?? []), ...(status?.excluded ?? [])].find(l => l.categoryId === o.id) ?? null;
   let label = line?.label ?? off?.label;
   if (!label) {
     const cats = await get<{ categories: { id: string; label: string }[] }>('/v1/categories');
-    label = cats?.categories.find(c => c.id === o.id)?.label;
+    if (!cats) return fail();
+    label = cats.categories.find(c => c.id === o.id)?.label;
   }
   if (!label) return null;
   const last = String(daysIn(month)).padStart(2, '0');
   const tx = await get<{ transactions: { id: string; date: string; payee: string | null; accountName: string; memo: string; amount: number }[] }>(
     `/v1/transactions?category=${encodeURIComponent(o.id)}&from=${month}-01&to=${month}-${last}&limit=1000`);
-  const rows = (tx?.transactions ?? []).map(r => ({ id: r.id, date: r.date, payee: r.payee, accountName: r.accountName, memo: r.memo ?? '', amount: r.amount }));
-  return { month, today, id: o.id, label, line, off, rows };
+  if (!tx) return fail(label);
+  const rows = tx.transactions.map(r => ({ id: r.id, date: r.date, payee: r.payee, accountName: r.accountName, memo: r.memo ?? '', amount: r.amount }));
+  return { month, today, id: o.id, label, line, off, rows, error: null };
 }
 
 const page = (lang: Lang, title: string, main: string) => `<!doctype html>
@@ -311,6 +329,11 @@ export function renderCategory(v: CategoryPageData, lang: Lang): string {
     ? (() => { const bal = v.line.balance.amount; return `<div class="row"><span>${esc(t.spentOf(ils(v.line.spent.amount), ils(held(v.line))))}</span>${bal < 0
       ? `<span class="off">${esc(t.over(ils(-bal)))}</span>` : `<span>${esc(t.left(ils(bal)))}</span>`}</div>`; })()
     : `<div class="row"><span>${esc(t.spent(ils(v.off?.spent.amount ?? -v.rows.reduce((s, r) => s + r.amount, 0))))}</span></div>`;
+  // The header counts Actual's budget figure; the list is the ledger. Say so when they disagree, never hide it.
+  const net = -v.rows.reduce((s, r) => s + r.amount, 0);
+  const counted = v.line?.spent.amount ?? v.off?.spent.amount;
+  const drift = counted !== undefined && (net !== counted || v.rows.length >= 1000)
+    ? `<p class="hint">${esc(t.drift(ils(net), ils(counted)))}</p>` : '';
   const out = v.rows.filter(r => r.amount < 0);
   const big = out.reduce<TxRow | null>((m, r) => (!m || r.amount < m.amount ? r : m), null);
   const list = v.rows.length
@@ -324,8 +347,8 @@ export function renderCategory(v: CategoryPageData, lang: Lang): string {
 <p class="when"><a href="${esc(`/budget?month=${v.month}`)}">${back} ${esc(t.back)}</a> · ${esc(monthName(v.month, lang))}</p>
 <nav class="nav"><a href="${esc(categoryHref(prev, v.id))}">${back} ${esc(shortMonth(prev, lang))}</a>${showNext
     ? `<a href="${esc(categoryHref(next, v.id))}">${esc(shortMonth(next, lang))} ${fwd}</a>` : '<span></span>'}</nav>
-<section>${nums}</section>
-<section>${list}</section>`);
+${v.error ? `<section><p>${esc(t.error)} ${esc(v.error)}</p></section>` : `<section>${nums}</section>
+<section>${list}${drift}</section>`}`);
 }
 
 export function createBudgetPage(deps: { api: ApiCall; verify?: (token: string) => Promise<string | null>; now?: () => Date }): Hono {
@@ -358,8 +381,11 @@ export function createBudgetPage(deps: { api: ApiCall; verify?: (token: string) 
   app.get('/budget/category', async c => {
     const lang = await gate(c);
     if (lang instanceof Response) return lang;
-    const v = await loadCategoryPage(deps.api, { now: now(), month: c.req.query('month'), id: c.req.query('id') ?? '' });
-    return v ? c.html(renderCategory(v, lang)) : c.html(renderCategoryNotFound(lang), 404);
+    const month = c.req.query('month');
+    if (month !== undefined && !validMonth(month)) return c.html(renderCategoryNotFound(lang), 404);
+    const v = await loadCategoryPage(deps.api, { now: now(), month, id: c.req.query('id') ?? '' });
+    if (!v) return c.html(renderCategoryNotFound(lang), 404);
+    return c.html(renderCategory(v, lang), v.error ? 502 : 200);
   });
   return app;
 }

@@ -128,3 +128,31 @@ test('month arrows keep the category, and there is a way back to the month', asy
   const dec = renderCategory((await load(s, 'groc', '2026-12'))!, 'en');
   expect(dec).not.toContain('month=2027-01');
 });
+
+test('a failed read is an error page, never "no transactions" or "not found" (review I1)', async () => {
+  const s = setup();
+  const failing = (bad: string) => async (path: string) =>
+    path.startsWith(bad) ? new Response(JSON.stringify({ error: { code: 'sync', message: 'server unreachable' } }), { status: 500 }) : s.api(path);
+  for (const bad of ['/v1/transactions', '/v1/budget/status']) {
+    const r = await createBudgetPage({ api: failing(bad), verify: ok, now: () => s.now }).request('/budget/category?month=2026-11&id=groc&lang=en', signed);
+    expect(r.status).toBe(502);
+    const body = await r.text();
+    expect(body).toContain('Could not read the budget:');
+    expect(body).not.toContain('No transactions this month.');
+    expect(body).not.toContain('Category not found.');
+  }
+});
+
+test('rows that do not add up to the budget figure say so (review I2)', async () => {
+  const s = setup();
+  const v = (await load(s, 'groc'))!;
+  // The fixture's status says groceries spent ₪200; the rows add up to ₪470.
+  expect(renderCategory(v, 'en')).toContain('These rows add up to ₪470; the budget counts ₪200.');
+  v.rows = v.rows.filter(r => r.id === 'g2').map(r => ({ ...r, amount: -20000 }));
+  expect(renderCategory(v, 'en')).not.toContain('add up to');
+});
+
+test('a malformed month is a 404, not the current month (review I3)', async () => {
+  const s = setup();
+  expect((await pageOf(s, ok).request('/budget/category?month=2026-13&id=groc', signed)).status).toBe(404);
+});
