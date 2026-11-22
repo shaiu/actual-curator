@@ -65,9 +65,9 @@ describe('pace', () => {
     expect(lines.map((l) => l.status)).toEqual(['off', 'off', 'off']);
   });
 
-  it('fixed bill fully spent early is watch (used up, never off)', () => {
+  it('fixed bill fully spent early is ok', () => {
     const p = plan([{ categoryId: 'rent', kind: 'fixed', priority: 1, amount: 4000 }]);
-    expect(pace(p, snap([c('rent', 4000, 4000)]), '2026-11-03')[0]!.status).toBe('watch');
+    expect(pace(p, snap([c('rent', 4000, 4000)]), '2026-11-03')[0]!.status).toBe('ok');
   });
 
   it('budgeted 0 and spent 0 is ok for every kind', () => {
@@ -259,8 +259,8 @@ describe('pace: used-up lines', () => {
   it('budgeted 0 and spent 0 is ok', () => {
     expect(status(0, 0, '2026-11-22').status).toBe('ok');
   });
-  it('used up is watch for a fixed line too', () => {
+  it('a fixed line paid in full stays ok', () => {
     const p = plan([{ categoryId: 'f', kind: 'fixed', priority: 1, amount: 100 }]);
-    expect(pace(p, snap([c('f', 100, 100)]), '2026-11-22')[0]!.status).toBe('watch');
+    expect(pace(p, snap([c('f', 100, 100)]), '2026-11-22')[0]!.status).toBe('ok');
   });
 });

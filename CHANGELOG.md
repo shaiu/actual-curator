@@ -2,8 +2,8 @@
 
 ## 0.4.1 — fewer false alarms
 
-- `pace()`: a line spent exactly to its budget (balance 0, spent > 0) is `watch` ("used up"), never `off`,
-  whatever its kind. A negative balance is still `off`; a line ahead of pace with money left is unchanged.
+- `pace()`: a variable line spent exactly to its budget (balance 0, spent > 0) is `watch` ("used up"), never `off`;
+  fixed and set-aside lines keep their own rules. A negative balance is still `off`; a line ahead of pace with money left is unchanged.
 - New status event kind `unplanned` (`unplanned:<month>:<categoryId>`, with `balance` as Money): a category
   the plan does not track that is overspent is announced. Excluded categories never produce it; it can be acked.
 

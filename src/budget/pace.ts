@@ -43,8 +43,9 @@ export function pace(plan: Plan, snap: MonthSnapshot, today: string): PaceLine[]
         status = 'ok';
       } else if (cat.balance < 0) {
         status = 'off';
-      } else if (cat.balance === 0 && spent > 0) {
-        // Used up exactly (a one-off bill funded to cover it, a monthly payment): nothing is over, so it is never `off`.
+      } else if (c.kind === 'variable' && cat.balance === 0 && spent > 0) {
+        // A variable line used up exactly (a one-off bill funded to cover it, a monthly payment): nothing is over, so it is never `off`.
+        // Fixed and setaside lines keep their own rules (a fixed bill paid in full is `ok`).
         status = 'watch';
       } else if (c.kind === 'variable') {
         if (d >= t.projectFromDay && effExcess >= (t.offPct / 100) * cat.budgeted) status = 'off';
