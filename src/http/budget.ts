@@ -38,7 +38,8 @@ const moneyPace = (l: PaceLine) => ({ ...l, budgeted: money(l.budgeted), spent: 
   expectedByToday: money(l.expectedByToday), projected: money(l.projected) });
 const moneyMove = (m: Move) => ({ ...m, amount: money(m.amount) });
 const moneyOff = (l: OffPlanLine) => ({ ...l, spent: money(l.spent), balance: money(l.balance) });
-const moneyEvent = (e: BudgetEvent) => (e.kind === 'income' ? { ...e, amount: money(e.amount) } : e);
+const moneyEvent = (e: BudgetEvent) =>
+  e.kind === 'income' ? { ...e, amount: money(e.amount) } : e.kind === 'unplanned' ? { ...e, balance: money(e.balance) } : e;
 
 const day30Before = (today: string): string => dayBefore(today, 30);
 const addDay = (date: string): string => dayBefore(date, -1);
@@ -256,10 +257,10 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const reviewIds = (await store.transactions({ from: day30Before(today), to: today, tag: 'review', limit: 10_000 })).map(r => r.id);
     const firstSaved = budget.firstSavedAt();
     const planSince = firstSaved ? jerusalemToday(firstSaved) : undefined;
-    const events = buildEvents({ plan, month, today, income, lines, reviewIds, acked: budget.state().acked,
+    const off = offPlan(plan, snap);
+    const events = buildEvents({ plan, month, today, income, lines, reviewIds, unplanned: off.unplanned, acked: budget.state().acked,
       ...(planSince ? { planSince } : {}) });
     const sum = (f: (l: PaceLine) => number) => lines.reduce((s, l) => s + f(l), 0);
-    const off = offPlan(plan, snap);
     return c.json({ month, today,
       totals: { budgeted: money(sum(l => l.budgeted)), spent: money(sum(l => l.spent)), balance: money(sum(l => l.balance)) },
       lines: lines.map(moneyPace), moves: moves.map(moneyMove), events: events.map(moneyEvent),

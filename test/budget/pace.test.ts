@@ -65,9 +65,9 @@ describe('pace', () => {
     expect(lines.map((l) => l.status)).toEqual(['off', 'off', 'off']);
   });
 
-  it('fixed bill fully spent early is ok', () => {
+  it('fixed bill fully spent early is watch (used up, never off)', () => {
     const p = plan([{ categoryId: 'rent', kind: 'fixed', priority: 1, amount: 4000 }]);
-    expect(pace(p, snap([c('rent', 4000, 4000)]), '2026-11-03')[0]!.status).toBe('ok');
+    expect(pace(p, snap([c('rent', 4000, 4000)]), '2026-11-03')[0]!.status).toBe('watch');
   });
 
   it('budgeted 0 and spent 0 is ok for every kind', () => {
@@ -243,5 +243,24 @@ describe('offPlan', () => {
     expect(r.unplanned.map((l) => l.categoryId)).toEqual(['usa', 'auto', 'refund']);
     expect(r.unplanned[0]).toMatchObject({ spent: 337400, balance: -337400 });
     expect(r.excluded.map((l) => l.categoryId)).toEqual(['biz']);
+  });
+});
+
+describe('pace: used-up lines', () => {
+  it('spent exactly to the budget (balance 0) is watch, not off', () => {
+    expect(status(500, 500, '2026-11-22').status).toBe('watch');
+  });
+  it('a negative balance is still off', () => {
+    expect(status(500, 600, '2026-11-22').status).toBe('off');
+  });
+  it('ahead of pace with a positive balance is still off', () => {
+    expect(status(1000, 900, '2026-11-10').status).toBe('off');
+  });
+  it('budgeted 0 and spent 0 is ok', () => {
+    expect(status(0, 0, '2026-11-22').status).toBe('ok');
+  });
+  it('used up is watch for a fixed line too', () => {
+    const p = plan([{ categoryId: 'f', kind: 'fixed', priority: 1, amount: 100 }]);
+    expect(pace(p, snap([c('f', 100, 100)]), '2026-11-22')[0]!.status).toBe('watch');
   });
 });

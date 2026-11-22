@@ -43,6 +43,9 @@ export function pace(plan: Plan, snap: MonthSnapshot, today: string): PaceLine[]
         status = 'ok';
       } else if (cat.balance < 0) {
         status = 'off';
+      } else if (cat.balance === 0 && spent > 0) {
+        // Used up exactly (a one-off bill funded to cover it, a monthly payment): nothing is over, so it is never `off`.
+        status = 'watch';
       } else if (c.kind === 'variable') {
         if (d >= t.projectFromDay && effExcess >= (t.offPct / 100) * cat.budgeted) status = 'off';
         else if (effExcess > (expected * t.watchPct) / 100 && effExcess >= t.watchMin * 100) status = 'watch';

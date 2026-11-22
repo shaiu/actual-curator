@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { planSchema } from '../../src/budget/types.ts';
 import { buildEvents, incomeStatus, matchIncome, type IncomeRow } from '../../src/budget/events.ts';
-import type { PaceLine } from '../../src/budget/pace.ts';
+import { offPlan, type OffPlanLine, type PaceLine } from '../../src/budget/pace.ts';
 
 const plan = planSchema.parse({
   version: 1, categories: [],
@@ -13,7 +13,7 @@ const plan = planSchema.parse({
 const row = (id: string, o: Partial<IncomeRow> = {}): IncomeRow => ({
   id, date: '2026-11-10', amount: 2000000, payee: 'ACME LTD', importedPayee: null, transferId: null, account: 'hap', ...o,
 });
-const base = { plan, month: '2026-11', today: '2026-11-12', income: [] as IncomeRow[], lines: [] as PaceLine[], reviewIds: [] as string[], acked: {} };
+const base = { plan, month: '2026-11', today: '2026-11-12', income: [] as IncomeRow[], lines: [] as PaceLine[], reviewIds: [] as string[], unplanned: [] as OffPlanLine[], acked: {} };
 const line = (status: 'ok' | 'watch' | 'off'): PaceLine => ({
   categoryId: 'dining', label: 'Dining', kind: 'variable', budgeted: 1, spent: 1, balance: 0, expectedByToday: 1, projected: 1, status,
 });
@@ -64,6 +64,26 @@ describe('events', () => {
     expect(w[0]).toMatchObject({ id: 'pace:2026-11:dining:watch', kind: 'pace', status: 'watch' });
     expect(o[0]).toMatchObject({ id: 'pace:2026-11:dining:off', status: 'off' });
     expect(paceOnly(buildEvents({ ...base, lines: [line('ok')] }))).toEqual([]);
+  });
+
+  it('an unplanned category over budget produces one unplanned event; balance >= 0 produces none', () => {
+    const u = (balance: number): OffPlanLine => ({ categoryId: 'yuval', label: 'Yuval', spent: 80000, balance });
+    const only = (o: object) => buildEvents({ ...base, ...o }).filter((e) => e.kind === 'unplanned');
+    expect(only({ unplanned: [u(-80000)] })).toEqual([
+      { id: 'unplanned:2026-11:yuval', kind: 'unplanned', categoryId: 'yuval', label: 'Yuval', balance: -80000 },
+    ]);
+    expect(only({ unplanned: [u(0)] })).toEqual([]);
+    expect(only({ unplanned: [u(500)] })).toEqual([]);
+    expect(only({ unplanned: [u(-80000)], acked: { 'unplanned:2026-11:yuval': 'x' } })).toEqual([]);
+  });
+
+  it('an excluded category over budget produces no unplanned event', () => {
+    const p = planSchema.parse({ version: 1, categories: [{ categoryId: 'biz', kind: 'excluded', priority: 1 }], incomeSources: [] });
+    const snap = { month: '2026-11', toBudget: 0, categories: [
+      { id: 'biz', label: 'Biz', hidden: false, isIncome: false, budgeted: 0, spent: -7000, balance: -7000 }] };
+    const off = offPlan(p, snap);
+    expect(off.excluded).toHaveLength(1);
+    expect(buildEvents({ ...base, plan: p, unplanned: off.unplanned }).filter((e) => e.kind === 'unplanned')).toEqual([]);
   });
 
   it('review event id hashes the sorted row ids: same rows keep the id on another day, new rows change it', () => {
