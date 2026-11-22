@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0
+
+- `/budget`: tap a line's name to see what went out of it this month, transaction by transaction.
+
 ## 0.3.4
 
 - `/budget`: the "Not in the plan" note now says what happened: the money was paid this month without
