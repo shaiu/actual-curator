@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Fewer false alarms: a category spent exactly to its budget now reads "used up" instead of "off pace".
+- Overspending in a category that is not in the plan is now announced.
+
 ## 0.4.0
 
 - `/budget`: tap a line's name to see what went out of it this month, transaction by transaction.

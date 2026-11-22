@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 — fewer false alarms
+
+- `pace()`: a line spent exactly to its budget (balance 0, spent > 0) is `watch` ("used up"), never `off`,
+  whatever its kind. A negative balance is still `off`; a line ahead of pace with money left is unchanged.
+- New status event kind `unplanned` (`unplanned:<month>:<categoryId>`, with `balance` as Money): a category
+  the plan does not track that is overspent is announced. Excluded categories never produce it; it can be acked.
+
 ## 0.4.0 — what went out of each line
 
 - New page `GET /budget/category?month=YYYY-MM&id=<category id>`, behind the same Cloudflare Access
