@@ -207,7 +207,7 @@
         "expectedDay": 5
       },
       {
-        "id": "pace:2026-11:groc:off",
+        "id": "pace:2026-11:groc:over",
         "kind": "pace",
         "categoryId": "groc",
         "label": "Needs / Groceries",

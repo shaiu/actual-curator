@@ -112,8 +112,10 @@ export function buildEvents(i: {
 
   for (const l of i.lines) {
     if (l.status === 'ok') continue;
+    // A real overspend (negative balance) gets its own id: acking an ahead-of-pace `off` must not hide it later.
+    const suffix = l.status === 'off' && l.balance < 0 ? 'over' : l.status;
     events.push({
-      id: `pace:${i.month}:${l.categoryId}:${l.status}`, kind: 'pace',
+      id: `pace:${i.month}:${l.categoryId}:${suffix}`, kind: 'pace',
       categoryId: l.categoryId, label: l.label, status: l.status,
     });
   }

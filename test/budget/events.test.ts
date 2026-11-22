@@ -86,6 +86,13 @@ describe('events', () => {
     expect(buildEvents({ ...base, plan: p, unplanned: off.unplanned }).filter((e) => e.kind === 'unplanned')).toEqual([]);
   });
 
+  it('a pace event for a negative balance has its own id, so acking an ahead-of-pace off does not hide a real overspend', () => {
+    const at = (balance: number, acked = {}) => buildEvents({ ...base, lines: [{ ...line('off'), balance }], acked }).filter((e) => e.kind === 'pace');
+    expect(at(100)[0]).toMatchObject({ id: 'pace:2026-11:dining:off', status: 'off' });
+    expect(at(-100)[0]).toMatchObject({ id: 'pace:2026-11:dining:over', status: 'off' });
+    expect(at(-100, { 'pace:2026-11:dining:off': 'x' })).toHaveLength(1);
+  });
+
   it('review event id hashes the sorted row ids: same rows keep the id on another day, new rows change it', () => {
     const rev = (o: object) => buildEvents({ ...base, ...o }).filter((e) => e.kind === 'review');
     const a = rev({ reviewIds: ['r3', 'r1', 'r2'] });

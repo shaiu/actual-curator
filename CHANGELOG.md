@@ -4,6 +4,9 @@
 
 - `pace()`: a variable line spent exactly to its budget (balance 0, spent > 0) is `watch` ("used up"), never `off`;
   fixed and set-aside lines keep their own rules. A negative balance is still `off`; a line ahead of pace with money left is unchanged.
+- A pace event for an overspent line (negative balance) has its own id, `pace:<month>:<categoryId>:over`, so acking
+  an ahead-of-pace `off` no longer hides a later real overspend. The `/budget` legend now reads: red = over budget,
+  amber = spending faster than the month or used up.
 - New status event kind `unplanned` (`unplanned:<month>:<categoryId>`, with `balance` as Money): a category
   the plan does not track that is overspent is announced. Excluded categories never produce it; it can be acked.
 
