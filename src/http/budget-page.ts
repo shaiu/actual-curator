@@ -146,6 +146,8 @@ export function renderBudget(v: BudgetPageData, lang: Lang): string {
   const current = v.month === v.today.slice(0, 7);
   const D = daysIn(v.month);
   const body: string[] = [];
+  /** A line's name, linked to the page listing what went out of it. */
+  const ln = (l: { categoryId: string; label: string }) => `<a class="cat" href="${esc(categoryHref(v.month, l.categoryId))}">${nm(l.label)}</a>`;
 
   if (v.error || !v.status) {
     body.push(`<section><p>${v.error === 'no_plan' ? esc(t.noPlan) : `${esc(t.error)} ${esc(v.error ?? '')}`}</p></section>`);
@@ -177,7 +179,7 @@ ${free !== undefined ? `<div class="chip ${free < 0 ? 'neg' : ''}">${esc(t.free)
         const scale = Math.max(b, s, 1);
         const tag = bal < 0 ? `<span class="off">${esc(t.over(ils(-bal)))}</span>` : `<span>${esc(t.left(ils(bal)))}</span>`;
         const mark = current && b > 0 ? `<em style="inset-inline-start:${pct(l.expectedByToday.amount, scale).toFixed(1)}%"></em>` : '';
-        return `<li class="${l.status}"><div class="row"><span class="name">${nm(l.label)}</span>${tag}</div>
+        return `<li class="${l.status}"><div class="row"><span class="name">${ln(l)}</span>${tag}</div>
 <div class="bar"><i style="width:${pct(s, scale).toFixed(1)}%"></i>${mark}</div><div class="sub">${esc(t.spentOf(ils(s), ils(b)))}</div></li>`;
       };
       const order = { off: 0, watch: 1, ok: 2 } as const;
@@ -189,14 +191,14 @@ ${current ? `<p class="legend">${esc(t.legend)}</p>` : ''}</section>`);
         const b = l.budgeted.amount, s = l.spent.amount, bal = l.balance.amount;
         const state = bal < 0 ? `<span class="off">${esc(t.over(ils(-bal)))}</span>`
           : s > 0 && s >= b ? `<span class="good">✓ ${esc(t.paid)}</span>` : `<span class="mute">${esc(t.due(ils(Math.max(0, b - s))))}</span>`;
-        return `<tr><td>${nm(l.label)}</td><td class="n">${ils(b)}</td><td class="n">${state}</td></tr>`;
+        return `<tr><td>${ln(l)}</td><td class="n">${ils(b)}</td><td class="n">${state}</td></tr>`;
       }).join('')}</table></section>`);
     }
-    const offRow = (l: OffPlan) => `<tr><td>${nm(l.label)}</td><td class="n mute">${esc(t.spentBal(ils(l.spent.amount), ils(l.balance.amount)))}</td></tr>`;
+    const offRow = (l: OffPlan) => `<tr><td>${ln(l)}</td><td class="n mute">${esc(t.spentBal(ils(l.spent.amount), ils(l.balance.amount)))}</td></tr>`;
     const unplanned = v.status.unplanned ?? [], excluded = v.status.excluded ?? [];
     if (unplanned.length) {
       body.push(`<section class="unplanned"><h2>${esc(t.unplanned)}</h2><table>${unplanned.map(l =>
-        `<tr><td>${nm(l.label)}</td><td class="n">${ils(l.spent.amount)}</td><td class="n ${l.balance.amount < 0 ? 'off' : 'mute'}">${l.balance.amount < 0
+        `<tr><td>${ln(l)}</td><td class="n">${ils(l.spent.amount)}</td><td class="n ${l.balance.amount < 0 ? 'off' : 'mute'}">${l.balance.amount < 0
           ? esc(t.over(ils(-l.balance.amount))) : esc(t.left(ils(l.balance.amount)))}</td></tr>`).join('')}</table>
 <p class="hint">${esc(t.unplannedHint(shortMonth(v.month, lang)))}</p>
 ${excluded.length ? `<details><summary>${esc(t.excludedTitle(excluded.length))}</summary><table>${excluded.map(offRow).join('')}</table></details>` : ''}</section>`);
@@ -205,7 +207,7 @@ ${excluded.length ? `<details><summary>${esc(t.excludedTitle(excluded.length))}<
     }
     if (saves.length) {
       body.push(`<section><h2>${esc(t.setaside)}</h2><table>${saves.map(l =>
-        `<tr><td>${nm(l.label)}</td><td class="n">${esc(t.saved(ils(l.balance.amount)))}</td></tr>`).join('')}</table></section>`);
+        `<tr><td>${ln(l)}</td><td class="n">${esc(t.saved(ils(l.balance.amount)))}</td></tr>`).join('')}</table></section>`);
     }
 
     // The advisor's proposal, as the advisor would send it: what is free, then each line it would fund.
