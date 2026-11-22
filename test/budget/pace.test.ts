@@ -245,3 +245,22 @@ describe('offPlan', () => {
     expect(r.excluded.map((l) => l.categoryId)).toEqual(['biz']);
   });
 });
+
+describe('pace: used-up lines', () => {
+  it('spent exactly to the budget (balance 0) is watch, not off', () => {
+    expect(status(500, 500, '2026-11-22').status).toBe('watch');
+  });
+  it('a negative balance is still off', () => {
+    expect(status(500, 600, '2026-11-22').status).toBe('off');
+  });
+  it('ahead of pace with a positive balance is still off', () => {
+    expect(status(1000, 900, '2026-11-10').status).toBe('off');
+  });
+  it('budgeted 0 and spent 0 is ok', () => {
+    expect(status(0, 0, '2026-11-22').status).toBe('ok');
+  });
+  it('a fixed line paid in full stays ok', () => {
+    const p = plan([{ categoryId: 'f', kind: 'fixed', priority: 1, amount: 100 }]);
+    expect(pace(p, snap([c('f', 100, 100)]), '2026-11-22')[0]!.status).toBe('ok');
+  });
+});

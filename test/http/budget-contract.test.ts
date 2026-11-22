@@ -80,7 +80,7 @@ test('status: a setaside and a variable on watch, a variable off, a suggested mo
   expect(body.lines.find(l => l.categoryId === 'dine')!.status).toBe('watch');
   expect(body.lines.find(l => l.categoryId === 'groc')!.status).toBe('off');
   expect(body.moves.length).toBeGreaterThan(0);
-  expect([...new Set(body.events.map(e => e.kind))].sort()).toEqual(['income', 'pace', 'review', 'transfer_missing']);
+  expect([...new Set(body.events.map(e => e.kind))].sort()).toEqual(['income', 'pace', 'review', 'transfer_missing', 'unplanned']);
   await expectFixture('status', 'GET /v1/budget/status', r, 200);
 });
 

@@ -207,7 +207,7 @@
         "expectedDay": 5
       },
       {
-        "id": "pace:2026-11:groc:off",
+        "id": "pace:2026-11:groc:over",
         "kind": "pace",
         "categoryId": "groc",
         "label": "Needs / Groceries",
@@ -226,6 +226,16 @@
         "categoryId": "trip",
         "label": "Wants / Trip",
         "status": "watch"
+      },
+      {
+        "id": "unplanned:2026-11:misc",
+        "kind": "unplanned",
+        "categoryId": "misc",
+        "label": "Wants / Misc",
+        "balance": {
+          "amount": -3000,
+          "formatted": "-30.00"
+        }
       },
       {
         "id": "review:81e4a9384d11",

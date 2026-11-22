@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { addMonths, daysInMonth, previousMonth } from './dates.ts';
-import type { PaceLine } from './pace.ts';
+import type { OffPlanLine, PaceLine } from './pace.ts';
 import type { IncomeSource, Plan } from './types.ts';
 
 export type BudgetEvent =
   | { id: string; kind: 'income'; source: string; amount: number; date: string; transactionId: string }
   | { id: string; kind: 'transfer_missing'; source: string; expectedDay: number }
   | { id: string; kind: 'pace'; categoryId: string; label: string; status: 'watch' | 'off' }
+  | { id: string; kind: 'unplanned'; categoryId: string; label: string; balance: number }
   | { id: string; kind: 'review'; count: number };
 
 /** Amounts in minor units. */
@@ -72,7 +73,9 @@ function transferLanded(s: IncomeSource, month: string, rows: IncomeRow[]): bool
 /** `income` is every candidate row (any dates): income events come from all of it, so a deposit near a month boundary is never lost. */
 export function buildEvents(i: {
   plan: Plan; month: string; today: string; income: IncomeRow[];
-  lines: PaceLine[]; reviewIds: string[]; acked: Record<string, string>;
+  lines: PaceLine[]; reviewIds: string[];
+  /** Categories the plan does not track (offPlan().unplanned); one with a negative balance is announced. Excluded ones are never passed. */
+  unplanned: OffPlanLine[]; acked: Record<string, string>;
   /** Jerusalem YYYY-MM-DD the plan was first saved: no transfer due before it is reported missing. */
   planSince?: string;
 }): BudgetEvent[] {
@@ -109,10 +112,16 @@ export function buildEvents(i: {
 
   for (const l of i.lines) {
     if (l.status === 'ok') continue;
+    // A real overspend (negative balance) gets its own id: acking an ahead-of-pace `off` must not hide it later.
+    const suffix = l.status === 'off' && l.balance < 0 ? 'over' : l.status;
     events.push({
-      id: `pace:${i.month}:${l.categoryId}:${l.status}`, kind: 'pace',
+      id: `pace:${i.month}:${l.categoryId}:${suffix}`, kind: 'pace',
       categoryId: l.categoryId, label: l.label, status: l.status,
     });
+  }
+  for (const u of i.unplanned) {
+    if (u.balance >= 0) continue;
+    events.push({ id: `unplanned:${i.month}:${u.categoryId}`, kind: 'unplanned', categoryId: u.categoryId, label: u.label, balance: u.balance });
   }
   if (i.reviewIds.length > 0) {
     const hash = createHash('sha256').update([...i.reviewIds].sort().join(',')).digest('hex').slice(0, 12);
