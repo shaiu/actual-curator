@@ -114,3 +114,17 @@ test('categories outside the plan get their own section; excluded ones are colla
   delete v.status.unplanned; delete v.status.excluded;
   expect(renderBudget(v, 'en')).not.toContain('Not in the plan');
 });
+
+test('every planned, unplanned and excluded line links to its category page', async () => {
+  const s = setup();
+  const html = renderBudget(await loadBudgetPage(s.api, { now: s.now }), 'en');
+  expect(html).toContain('href="/budget/category?month=2026-11&amp;id=groc"');
+  expect(html).toContain('href="/budget/category?month=2026-11&amp;id=rent"');
+  const v = view([line('Needs / Gas ⛽', 1855, 384, 1471)], true) as any;
+  v.status.unplanned = [{ categoryId: 'auto', label: 'Needs / Auto', spent: mny(2922), balance: mny(-2922) }];
+  v.status.excluded = [{ categoryId: 'biz', label: 'Needs / Biz', spent: mny(100), balance: mny(-100) }];
+  const h = renderBudget(v, 'en');
+  for (const id of ['Needs%20%2F%20Gas%20%E2%9B%BD', 'auto', 'biz']) expect(h).toContain(`href="/budget/category?month=2026-11&amp;id=${id}"`);
+  // Proposal lines and moves carry labels only: no link.
+  expect(h).not.toMatch(/<a class="cat"[^>]*>(<bdi>)?Fun/);
+});

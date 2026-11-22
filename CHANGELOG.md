@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.0 — what went out of each line
+
+- New page `GET /budget/category?month=YYYY-MM&id=<category id>`, behind the same Cloudflare Access
+  check as `/budget`: one category's transactions for the month, newest first (date, payee, account,
+  memo; refunds as a green "+"), its spent / budgeted / left from `/v1/budget/status`, a summary
+  (count and largest), and month arrows. Every line on `/budget` links to it.
+- An unknown id or a malformed month is a 404; a failed read is a 502 error page, never an empty list.
+  When the rows do not add up to the budget's spent figure, the page says so.
+- `/budget/*` is routed to the page app (it was an exact match on `/budget`).
+
 ## 0.3.4 — clearer wording
 
 - The unplanned hint named "next month", which read as if November's payments were charged to

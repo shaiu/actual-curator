@@ -12,6 +12,7 @@ import { BudgetFiles } from './budget/plan-store.ts';
 import { createApp } from './http/app.ts';
 import { exclusionResolver } from './http/exclusions.ts';
 import { createBudgetPage } from './http/budget-page.ts';
+import { pageFor } from './http/route.ts';
 import { createMoneyPage } from './http/money.ts';
 import { DecisionLog } from './log.ts';
 import { createNotifier } from './notify.ts';
@@ -62,10 +63,11 @@ async function main() {
   // /money and /budget are their own small apps; everything else is the API, with its JSON 404s.
   const fetch = (req: Request) => {
     const path = new URL(req.url).pathname;
-    return path === '/money' ? page.fetch(req) : path === '/budget' ? budgetPage.fetch(req) : app.fetch(req);
+    const to = pageFor(path);
+    return to === 'money' ? page.fetch(req) : to === 'budget' ? budgetPage.fetch(req) : app.fetch(req);
   };
   const server = serve({ fetch, port: cfg.port, hostname: '0.0.0.0' },
-    info => console.log(`HTTP API on :${info.port}/v1${cfg.access ? ' · /money and /budget behind Cloudflare Access' : ''}`));
+    info => console.log(`HTTP API on :${info.port}/v1${cfg.access ? ' · /money and /budget/* behind Cloudflare Access' : ''}`));
 
   let closing = false;
   const shutdown = async (signal: string) => {

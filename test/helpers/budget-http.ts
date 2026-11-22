@@ -63,10 +63,12 @@ export class FakeStore implements ApiStore {
   async budgetMonths() { return [...this.months]; }
   accountCalls = 0;
   async accounts() { this.accountCalls++; return [{ id: 'a', name: 'Bank', offbudget: false }, { id: 'off', name: 'Savings', offbudget: true }, { id: 'hap', name: 'Hapoalim', offbudget: false }]; }
-  async categories() { return [] as CategoryOption[]; }
-  async transactions(q: { from: string; to: string; tag?: string; limit: number }) {
+  cats: CategoryOption[] = [];
+  async categories() { return [...this.cats]; }
+  async transactions(q: { from: string; to: string; category?: string; tag?: string; limit: number }) {
     this.txQueries.push(q);
-    return this.rows.filter(r => r.date >= q.from && r.date <= q.to && (!q.tag || (r.notes ?? '').includes(`#${q.tag}`)));
+    return this.rows.filter(r => r.date >= q.from && r.date <= q.to && (!q.category || r.category === q.category)
+      && (!q.tag || (r.notes ?? '').includes(`#${q.tag}`))).sort((a, b) => b.date.localeCompare(a.date)).slice(0, q.limit);
   }
   async transaction() { return undefined; }
   async update() {}
