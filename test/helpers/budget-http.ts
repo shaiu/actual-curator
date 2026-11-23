@@ -7,6 +7,7 @@ import type { CategoryOption } from '../../src/classifier/types.ts';
 import { BudgetFiles } from '../../src/budget/plan-store.ts';
 import type { MonthSnapshot, PlanInput } from '../../src/budget/types.ts';
 import { type ApiStore, createApp } from '../../src/http/app.ts';
+import { ReviewPayees } from '../../src/curator/review-payees.ts';
 import { DecisionLog } from '../../src/log.ts';
 import { parseVocabulary } from '../../src/vocabulary.ts';
 
@@ -119,7 +120,7 @@ export function makeBudgetApp(opts: { now?: Date } = {}) {
   const store = new FakeStore();
   const dir = mkdtempSync(join(tmpdir(), 'curator-budget-'));
   const files = new BudgetFiles(dir);
-  const app = createApp({ store, log: new DecisionLog(dir), vocab, cfg: { token: 'secret', currency: 'ILS' }, classifierName: 'fake',
+  const app = createApp({ store, log: new DecisionLog(dir), vocab, reviewPayees: new ReviewPayees(dir, vocab), cfg: { token: 'secret', currency: 'ILS' }, classifierName: 'fake',
     runNow: async () => { throw new Error('unused'); }, versions: { curator: '0.2.0', actualApi: '1', server: '1' },
     status: () => ({}), budget: files, now: () => clock });
   return { app, store, files, dir, setNow: (d: Date) => { clock = d; } };

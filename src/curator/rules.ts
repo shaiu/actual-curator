@@ -62,7 +62,11 @@ export function memoKeyPhrase(memo: string, patterns: string[]): string | undefi
 export function ruleForRow(row: CuratorRow, categoryId: string, vocab: Vocabulary): NewCuratorRule | undefined {
   const importedPayee = row.importedPayee?.trim();
   if (!importedPayee) return undefined;
-  if (!vocab.genericPayees.some(g => norm(g) === norm(importedPayee))) return { importedPayee, categoryId };
+  if (!vocab.genericPayees.some(g => norm(g) === norm(importedPayee))) {
+    // An always-review payee sells many kinds of things: a rule on the payee alone would file the next one wrongly.
+    if (vocab.reviewPayees.some(r => norm(r) === norm(importedPayee))) return undefined;
+    return { importedPayee, categoryId };
+  }
   const known = new Set([...vocab.tags.map(t => t.tag), ...vocab.reserved]);
   const memo = parseTags(row.notes, known).memo.trim();
   const notesContains = memoKeyPhrase(memo, vocab.memoKeyPatterns) ?? memo;

@@ -4,6 +4,7 @@ import { type ActualStore, StaleRowError } from '../actual/store.ts';
 import type { CuratorRow, CuratorRule, ReportRow, RuleOrigin } from '../actual/types.ts';
 import type { Config } from '../config.ts';
 import { categoryOf, isSupported, ruleForRow } from '../curator/rules.ts';
+import { normPayee, type ReviewPayees } from '../curator/review-payees.ts';
 import type { RunSummary } from '../curator/run.ts';
 import type { DecisionLog } from '../log.ts';
 import { hasTag, parseTags, withTags } from '../notes.ts';
@@ -25,6 +26,7 @@ export type ApiDeps = {
   store: ApiStore;
   log: DecisionLog;
   vocab: Vocabulary;
+  reviewPayees: ReviewPayees;
   cfg: Pick<Config, 'token' | 'currency'> & Partial<Pick<Config, 'reportExclude'>>;
   classifierName: string;
   runNow: () => Promise<RunSummary>;
@@ -148,6 +150,9 @@ export function createApp(deps: ApiDeps): Hono {
         .sort((a, b) => a.current.amount - b.current.amount), ...named(ex) });
   });
 
+  const isReviewPayee = (p: string | null | undefined) => Boolean(normPayee(p)) && vocab.reviewPayees.some(r => normPayee(r) === normPayee(p))
+    && !vocab.genericPayees.some(g => normPayee(g) === normPayee(p));
+
   const setBody = z.object({
     category: z.string().min(1).optional(),
     tags: z.object({ add: z.array(z.string()).default([]), remove: z.array(z.string()).default([]) }).optional(),
@@ -168,8 +173,10 @@ export function createApp(deps: ApiDeps): Hono {
     const category = body.category ?? row.category;
     const notes = withTags(row.notes, add, body.category ? [...remove, 'review'] : remove, known);
     let ruleId: string | undefined;
+    let ruleSkipped: 'review_payee' | undefined;
     if (body.category && body.rule) {
       const rule = ruleForRow(row, body.category, vocab);
+      if (!rule && isReviewPayee(row.importedPayee)) ruleSkipped = 'review_payee';
       if (rule) {
         ruleId = await store.replaceRule(rule);
         await log.rules.record(ruleId, 'human', { importedPayee: rule.importedPayee, notesContains: rule.notesContains });
@@ -194,7 +201,8 @@ export function createApp(deps: ApiDeps): Hono {
       }
     }
     if (ruleId || Object.keys(fields).length) await push();
-    return c.json({ transaction: view({ ...row, category, notes }, lbl), ...(ruleId ? { ruleId } : {}) });
+    return c.json({ transaction: view({ ...row, category, notes }, lbl), ...(ruleId ? { ruleId } : {}),
+      ...(ruleSkipped ? { ruleSkipped } : {}) });
   });
 
   const ruleView = async (r: CuratorRule, lbl: Map<string, string>, visible?: Set<string>) => {
@@ -217,6 +225,9 @@ export function createApp(deps: ApiDeps): Hono {
       category: z.string().min(1), origin: z.enum(['human', 'bootstrap', 'promoted']).default('human') })
       .parse(await c.req.json().catch(() => ({})));
     if (!(await labels()).has(b.category)) throw new ApiError(400, 'bad_request', `Unknown category ${b.category}`);
+    if (!b.notesContains && isReviewPayee(b.payee)) {
+      throw new ApiError(409, 'review_payee', `${b.payee} is always reviewed; a rule on the payee alone would file its next purchase wrongly`);
+    }
     const id = await store.replaceRule({ importedPayee: b.payee, categoryId: b.category,
       ...(b.notesContains ? { notesContains: b.notesContains } : {}) });
     await log.rules.record(id, b.origin as RuleOrigin, { importedPayee: b.payee, notesContains: b.notesContains });
@@ -230,6 +241,34 @@ export function createApp(deps: ApiDeps): Hono {
     await log.rules.forget(id);
     await push();
     return c.json({ deleted: id });
+  });
+
+  app.get('/review-payees', c => c.json({ payees: deps.reviewPayees.list() }));
+
+  app.post('/review-payees', async c => {
+    const b = z.object({ payee: z.string().trim().min(1), by: z.string().trim().min(1) }).parse(await c.req.json().catch(() => ({})));
+    const added = deps.reviewPayees.add(b.payee, b.by, now());
+    // The payee's plain rules would keep filing its rows at import, so they go; memo-keyed rules are a different thing.
+    const lbl = await labels();
+    const deletedRules: { id: string; categoryLabel?: string }[] = [];
+    for (const r of await store.rules()) {
+      const only = r.conditions.length === 1 && r.conditions[0].field === 'imported_payee' && r.conditions[0].op === 'is';
+      if (!only || normPayee(r.conditions[0].value) !== normPayee(b.payee)) continue;
+      if (!(await store.deleteRule(r.id))) continue;
+      await log.rules.forget(r.id);
+      const cat = categoryOf(r);
+      deletedRules.push({ id: r.id, ...(cat && lbl.get(cat) ? { categoryLabel: lbl.get(cat) } : {}) });
+    }
+    if (deletedRules.length) await push();
+    return c.json({ payee: b.payee, added, deletedRules });
+  });
+
+  app.delete('/review-payees/:payee', c => {
+    const payee = c.req.param('payee');
+    const res = deps.reviewPayees.remove(payee);
+    if (res === 'config') throw new ApiError(409, 'config_payee', `${payee} is set in the curator config (reviewPayees) and cannot be removed through the API`);
+    if (res === 'absent') throw new ApiError(404, 'not_found', `${payee} is not in the always-review list`);
+    return c.json({ removed: payee });
   });
 
   app.post('/curate/run', async c => c.json(await deps.runNow()));

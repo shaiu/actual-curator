@@ -278,7 +278,7 @@ paths:
       responses:
         "200": { description: OK, content: { application/json: { schema: { type: object, properties: { rules: { type: array, items: { $ref: "#/components/schemas/Rule" } } } } } } }
     post:
-      summary: Create a rule "imported payee is X [and notes contain Y] → category"; replaces one with the same conditions
+      summary: Create a rule "imported payee is X [and notes contain Y] → category"; replaces one with the same conditions. 409 review_payee for a payee-only rule on an always-review payee
       requestBody:
         content:
           application/json:
@@ -300,6 +300,31 @@ paths:
       responses:
         "200": { description: OK }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/review-payees:
+    get:
+      summary: Payees whose rows always go to review (no rule is ever made on the payee alone). `config` entries come from the curator's config; `api` entries from POST
+      responses:
+        "200": { description: "OK: {payees: [{payee, source: config|api, by?, at?}]}" }
+    post:
+      summary: Add a payee to the always-review list (case/space-insensitive; added=false when already listed). Deletes that payee's plain "imported payee is X" rules, never a memo-keyed one
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payee, by]
+              properties: { payee: { type: string }, by: { type: string } }
+      responses:
+        "200": { description: "OK: {payee, added, deletedRules: [{id, categoryLabel?}]}" }
+        "400": { $ref: "#/components/responses/Error" }
+  /v1/review-payees/{payee}:
+    delete:
+      summary: Remove an api-added payee (URL-encode the payee). 409 config_payee for one set in the curator config
+      parameters: [{ name: payee, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: "OK: {removed}" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/curate/run:
     post:
       summary: Run the curator now (waits for an in-flight run instead of starting a second)

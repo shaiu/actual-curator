@@ -204,7 +204,7 @@ export async function curate(deps: CurateDeps): Promise<RunSummary> {
         s.classified++;
         // 4. Promotion: a machine answer becomes a rule only after repeated agreement, never for generic payees.
         const payee = r.importedPayee?.trim();
-        if (!cfg.dryRun && payee && !generic.has(norm(payee)) && d.category && !firstMatch(rules, r)
+        if (!cfg.dryRun && payee && !generic.has(norm(payee)) && !vocab.reviewPayees.some(x => norm(x) === norm(payee)) && d.category && !firstMatch(rules, r)
           && (await log.confidentHits(payee, d.category)) >= cfg.promoteAfter) {
           const id = await store.createRule({ importedPayee: payee, categoryId: d.category });
           changed = true;

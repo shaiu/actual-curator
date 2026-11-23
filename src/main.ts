@@ -6,6 +6,7 @@ import { serve } from '@hono/node-server';
 import { ActualStore } from './actual/store.ts';
 import { createClassifier } from './classifier/index.ts';
 import { loadConfig } from './config.ts';
+import { ReviewPayees } from './curator/review-payees.ts';
 import { curate } from './curator/run.ts';
 import { accessVerifier } from './http/access.ts';
 import { BudgetFiles } from './budget/plan-store.ts';
@@ -30,6 +31,7 @@ async function main() {
     console.log(`No vocabulary at ${cfg.vocabPath}; copied the example there. Edit it to taste.`);
   }
   const vocab = loadVocabulary(cfg.vocabPath);
+  const reviewPayees = new ReviewPayees(cfg.dataDir, vocab); // extends vocab.reviewPayees with the API's additions
 
   const budgetDir = join(cfg.dataDir, 'actual');
   mkdirSync(budgetDir, { recursive: true });
@@ -51,7 +53,7 @@ async function main() {
     return s;
   }, { intervalMinutes: cfg.runIntervalMinutes, notifier });
 
-  const app = createApp({ store, log, vocab, cfg, classifierName: classifier.name, runNow: scheduler.runNow,
+  const app = createApp({ store, log, vocab, reviewPayees, cfg, classifierName: classifier.name, runNow: scheduler.runNow,
     status: scheduler.status, versions, budget: new BudgetFiles(cfg.dataDir) });
   const page = createMoneyPage({ store, exclusions: exclusionResolver(store, cfg.reportExclude), watch: cfg.moneyWatch,
     pending: async () => (await store.transactions({ from: '1970-01-01', to: '9999-12-31', tag: 'review', limit: 10_000 })).length,

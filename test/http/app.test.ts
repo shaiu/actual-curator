@@ -8,6 +8,7 @@ import type { CategoryOption } from '../../src/classifier/types.ts';
 import type { RunSummary } from '../../src/curator/run.ts';
 import { BudgetFiles } from '../../src/budget/plan-store.ts';
 import { type ApiStore, createApp } from '../../src/http/app.ts';
+import { ReviewPayees } from '../../src/curator/review-payees.ts';
 import { DecisionLog } from '../../src/log.ts';
 import { parseVocabulary } from '../../src/vocabulary.ts';
 
@@ -78,7 +79,8 @@ const json = (body: unknown) => ({ method: 'POST', headers: { ...auth, 'content-
 beforeEach(() => {
   store = new FakeStore();
   log = new DecisionLog(mkdtempSync(join(tmpdir(), 'curator-http-')));
-  app = createApp({ store, log, vocab, cfg: { token: 'secret', currency: 'ILS' }, classifierName: 'fake',
+  app = createApp({ store, log, vocab, reviewPayees: new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), vocab),
+    cfg: { token: 'secret', currency: 'ILS' }, classifierName: 'fake',
     runNow: async () => summary, versions: { curator: '0.1.0', actualApi: '26.10.0', server: '26.10.0' },
     status: () => ({ lastSyncAt: '2026-10-16T10:00:00Z', lastRunAt: '2026-10-16T10:00:00Z', lastRunOk: true }),
     budget: new BudgetFiles(mkdtempSync(join(tmpdir(), 'curator-budget-'))),
@@ -193,7 +195,8 @@ test('a failed transaction write gets an error line after the settled-review cla
 
 test('reports pass the configured exclusions to the store as ids and name them in the reply', async () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  const ex = createApp({ store, log, vocab, cfg: { token: 'secret', currency: 'ILS', reportExclude: ['Wants / Gifts', 'dining', 'Nope / Typo'] },
+  const ex = createApp({ store, log, vocab, reviewPayees: new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), vocab),
+    cfg: { token: 'secret', currency: 'ILS', reportExclude: ['Wants / Gifts', 'dining', 'Nope / Typo'] },
     classifierName: 'fake', runNow: async () => summary, versions: { curator: '0', actualApi: '0', server: '0' },
     status: () => ({}), budget: new BudgetFiles(mkdtempSync(join(tmpdir(), 'curator-budget-'))),
     now: () => new Date('2026-10-16T12:00:00Z') });
@@ -230,4 +233,105 @@ test('GET /review carries why the row is in review', async () => {
     reason: 'category Needs / Old (hidden) is hidden' });
   const { rows } = await (await app.request('/v1/review', { headers: auth })).json();
   expect(rows[0]).toMatchObject({ id: 'h', reviewReason: 'category Needs / Old (hidden) is hidden' });
+});
+
+// ---- always-review payees
+const mkApp = (rp: ReviewPayees, v = vocab) => createApp({ store, log, vocab: v, reviewPayees: rp, cfg: { token: 'secret', currency: 'ILS' },
+  classifierName: 'fake', runNow: async () => summary, versions: { curator: '0.1.0', actualApi: '26.10.0', server: '26.10.0' },
+  status: () => ({}), budget: new BudgetFiles(mkdtempSync(join(tmpdir(), 'curator-budget-'))), now: () => new Date('2026-10-16T12:00:00Z') });
+const payeeRule = (id: string, payee: string, cat = 'coffee', memo?: string): CuratorRule => ({ id, stage: null, conditionsOp: 'and',
+  conditions: [{ field: 'imported_payee', op: 'is', value: payee }, ...(memo ? [{ field: 'notes', op: 'contains', value: memo }] : [])],
+  actions: [{ field: 'category', op: 'set', value: cat }] });
+
+test('review-payees: GET lists config and api entries; POST adds and deletes only the plain payee rules', async () => {
+  const v = parseVocabulary(`
+tags:
+  - { tag: kids, meaning: for a child }
+reviewPayees: [Config Co]
+`);
+  const rp = new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), v);
+  const a = mkApp(rp, v);
+  store.ruleList.push(payeeRule('r1', 'היי ביז בע"מ'), payeeRule('r2', 'היי ביז בע"מ', 'gifts', 'דנה'), payeeRule('r3', 'ארומה'),
+    payeeRule('r4', ' היי ביז בע"מ ', 'dining'));
+  for (const id of ['r1', 'r4']) await log.rules.record(id, 'human', { importedPayee: 'x' });
+  const syncs = store.syncs;
+  const r = await a.request('/v1/review-payees', json({ payee: 'היי ביז בע"מ  ', by: 'shai' }));
+  expect(r.status).toBe(200);
+  expect(await r.json()).toEqual({ payee: 'היי ביז בע"מ', added: true,
+    deletedRules: [{ id: 'r1', categoryLabel: 'Needs / Coffee' }, { id: 'r4', categoryLabel: 'Wants / Dining' }] });
+  expect(store.ruleList.map(x => x.id)).toEqual(['r2', 'r3']);
+  expect(store.syncs).toBe(syncs + 1);
+  expect(await log.rules.originOf('r1')).toBeUndefined();
+  const list = await (await a.request('/v1/review-payees', { headers: auth })).json();
+  expect(list.payees).toEqual([{ payee: 'Config Co', source: 'config' },
+    { payee: 'היי ביז בע"מ', source: 'api', by: 'shai', at: '2026-10-16T12:00:00.000Z' }]);
+  const again = await (await a.request('/v1/review-payees', json({ payee: 'היי ביז בע"מ', by: 'shai' }))).json();
+  expect(again).toMatchObject({ added: false });
+  expect((await a.request('/v1/review-payees', json({ payee: '  ', by: 'shai' }))).status).toBe(400);
+  expect((await a.request('/v1/review-payees', json({ payee: 'x' }))).status).toBe(400);
+  expect((await a.request('/v1/review-payees', { headers: {} })).status).toBe(401);
+});
+
+test('review-payees: DELETE removes api entries; 404 when absent; 409 config_payee for a config one', async () => {
+  const v = parseVocabulary(`
+tags:
+  - { tag: kids, meaning: for a child }
+reviewPayees: [Config Co]
+`);
+  const a = mkApp(new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), v), v);
+  await a.request('/v1/review-payees', json({ payee: 'היי ביז בע"מ', by: 'shai' }));
+  const del = (p: string) => a.request(`/v1/review-payees/${encodeURIComponent(p)}`, { method: 'DELETE', headers: auth });
+  const ok = await del('היי ביז בע"מ');
+  expect(ok.status).toBe(200);
+  expect(await ok.json()).toEqual({ removed: 'היי ביז בע"מ' });
+  expect((await del('היי ביז בע"מ')).status).toBe(404);
+  const cfgRes = await del('config co');
+  expect(cfgRes.status).toBe(409);
+  expect((await cfgRes.json()).error.code).toBe('config_payee');
+});
+
+test('POST /transactions/:id for an always-review payee: category set, no rule, ruleSkipped; generic payee still gets a memo rule', async () => {
+  const v = parseVocabulary(`
+tags:
+  - { tag: kids, meaning: for a child }
+genericPayees: [PAYBOX]
+reviewPayees: [PAYBOX]
+`);
+  const rp = new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), v);
+  const a = mkApp(rp, v);
+  await a.request('/v1/review-payees', json({ payee: 'היי ביז', by: 'shai' }));
+  store.rows.push(row({ id: 'h1', payee: 'Hi Biz', importedPayee: 'היי ביז ', notes: 'm #auto #review' }),
+    row({ id: 'b1', payee: 'PAYBOX', importedPayee: 'PAYBOX', notes: 'לטובת: דנה.' }));
+  const r = await a.request('/v1/transactions/h1', json({ category: 'gifts' }));
+  const body = await r.json();
+  expect(body.ruleSkipped).toBe('review_payee');
+  expect(body.ruleId).toBeUndefined();
+  expect(store.ruleList).toEqual([]);
+  expect(store.rows[0]).toMatchObject({ category: 'gifts' });
+  // a generic payee that is also always-review keeps its memo rule
+  const g = await (await a.request('/v1/transactions/b1', json({ category: 'gifts' }))).json();
+  expect(g.ruleId).toBeDefined();
+  expect(g.ruleSkipped).toBeUndefined();
+  // rule:false is not "skipped"
+  store.rows.push(row({ id: 'h2', importedPayee: 'היי ביז' }));
+  expect((await (await a.request('/v1/transactions/h2', json({ category: 'gifts', rule: false }))).json()).ruleSkipped).toBeUndefined();
+});
+
+test('POST /rules: a plain payee rule for an always-review payee is 409 review_payee; a memo rule is allowed', async () => {
+  const rp = new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), vocab);
+  const a = mkApp(rp);
+  await a.request('/v1/review-payees', json({ payee: 'היי ביז', by: 'shai' }));
+  const bad = await a.request('/v1/rules', json({ payee: ' היי ביז ', category: 'coffee' }));
+  expect(bad.status).toBe(409);
+  expect((await bad.json()).error.code).toBe('review_payee');
+  expect((await a.request('/v1/rules', json({ payee: 'היי ביז', notesContains: 'x', category: 'coffee' }))).status).toBe(200);
+  expect((await a.request('/v1/rules', json({ payee: 'ארומה', category: 'coffee' }))).status).toBe(200);
+});
+
+test('transaction and review views expose the imported payee beside the Actual payee name', async () => {
+  store.rows.push(row({ id: 'v1', payee: 'Hi Biz', importedPayee: 'היי ביז בע"מ', notes: '#review' }));
+  const rv = await (await app.request('/v1/review', { headers: auth })).json();
+  expect(rv.rows[0]).toMatchObject({ payee: 'Hi Biz', importedPayee: 'היי ביז בע"מ' });
+  const tx = await (await app.request('/v1/transactions?from=2026-10-01', { headers: auth })).json();
+  expect(tx.transactions[0]).toMatchObject({ payee: 'Hi Biz', importedPayee: 'היי ביז בע"מ' });
 });
