@@ -315,8 +315,9 @@ paths:
               required: [payee, by]
               properties: { payee: { type: string }, by: { type: string } }
       responses:
-        "200": { description: "OK: {payee, added, deletedRules: [{id, categoryLabel?}]}" }
+        "200": { description: "OK: {payee, added, deletedRules: [{id, categoryLabel?}], notDeleted?: [{id}]}" }
         "400": { $ref: "#/components/responses/Error" }
+        "502": { description: "partial_delete: a rule delete failed; body also has payee, added, deletedRules (already deleted and pushed), failedRule {id}, notDeleted" }
   /v1/review-payees/{payee}:
     delete:
       summary: Remove an api-added payee (URL-encode the payee). 409 config_payee for one set in the curator config

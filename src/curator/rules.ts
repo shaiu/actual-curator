@@ -55,6 +55,12 @@ export function memoKeyPhrase(memo: string, patterns: string[]): string | undefi
   return undefined;
 }
 
+/** An always-review payee that is not generic: the one case where a payee-only rule must never exist. */
+export function isAlwaysReviewPayee(importedPayee: string | null | undefined, vocab: Vocabulary): boolean {
+  const p = norm(importedPayee);
+  return p !== '' && vocab.reviewPayees.some(r => norm(r) === p) && !vocab.genericPayees.some(g => norm(g) === p);
+}
+
 /**
  * The rule a human answer (or a promotion) creates for this row: the payee, plus, for a generic
  * payee, the memo key phrase or else the whole memo. Undefined when there is nothing to match on.
@@ -64,7 +70,7 @@ export function ruleForRow(row: CuratorRow, categoryId: string, vocab: Vocabular
   if (!importedPayee) return undefined;
   if (!vocab.genericPayees.some(g => norm(g) === norm(importedPayee))) {
     // An always-review payee sells many kinds of things: a rule on the payee alone would file the next one wrongly.
-    if (vocab.reviewPayees.some(r => norm(r) === norm(importedPayee))) return undefined;
+    if (isAlwaysReviewPayee(importedPayee, vocab)) return undefined;
     return { importedPayee, categoryId };
   }
   const known = new Set([...vocab.tags.map(t => t.tag), ...vocab.reserved]);

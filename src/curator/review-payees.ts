@@ -45,10 +45,10 @@ export class ReviewPayees {
     this.vocab.reviewPayees.splice(0, this.vocab.reviewPayees.length, ...this.config, ...this.api.map(p => p.payee));
   }
 
-  private save(): void {
+  private save(list: Stored[]): void {
     mkdirSync(dirname(this.file), { recursive: true });
     const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify({ payees: this.api }, null, 2)}\n`);
+    writeFileSync(tmp, `${JSON.stringify({ payees: list }, null, 2)}\n`);
     renameSync(tmp, this.file);
   }
 
@@ -61,8 +61,9 @@ export class ReviewPayees {
   add(payee: string, by: string, at: Date): boolean {
     const p = payee.trim();
     if (!p || this.has(p)) return false;
-    this.api.push({ payee: p, by, at: at.toISOString() });
-    this.save();
+    const next = [...this.api, { payee: p, by, at: at.toISOString() }];
+    this.save(next); // memory follows the file, so a failed save changes nothing
+    this.api = next;
     this.sync();
     return true;
   }
@@ -72,8 +73,9 @@ export class ReviewPayees {
     if (this.config.some(p => normPayee(p) === n)) return 'config';
     const i = this.api.findIndex(p => normPayee(p.payee) === n);
     if (i < 0) return 'absent';
-    this.api.splice(i, 1);
-    this.save();
+    const next = this.api.filter((_, j) => j !== i);
+    this.save(next);
+    this.api = next;
     this.sync();
     return 'removed';
   }

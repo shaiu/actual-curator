@@ -335,3 +335,23 @@ test('transaction and review views expose the imported payee beside the Actual p
   const tx = await (await app.request('/v1/transactions?from=2026-10-01', { headers: auth })).json();
   expect(tx.transactions[0]).toMatchObject({ payee: 'Hi Biz', importedPayee: 'היי ביז בע"מ' });
 });
+
+test('review-payees POST: a deleteRule that throws still pushes what was deleted and reports it; a false return is reported', async () => {
+  const rp = new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), vocab);
+  const a = mkApp(rp);
+  store.ruleList.push(payeeRule('r1', 'X', 'coffee'), payeeRule('r2', 'X', 'gifts'), payeeRule('r3', 'X', 'dining'), payeeRule('r4', 'X', 'groc'));
+  const real = store.deleteRule.bind(store);
+  store.deleteRule = async (id: string) => { if (id === 'r2') return false; if (id === 'r3') throw new Error('boom'); return real(id); };
+  const syncs = store.syncs;
+  const res = await a.request('/v1/review-payees', json({ payee: 'X', by: 'shai' }));
+  expect(res.status).toBe(502);
+  const body = await res.json();
+  expect(body.error.code).toBe('partial_delete');
+  expect(body).toMatchObject({ payee: 'X', added: true, deletedRules: [{ id: 'r1', categoryLabel: 'Needs / Coffee' }],
+    failedRule: { id: 'r3' }, notDeleted: [{ id: 'r2' }] });
+  expect(store.syncs).toBe(syncs + 1);
+  // no throw: a false return shows up as notDeleted in a 200
+  store.deleteRule = async (id: string) => (id === 'r4' ? false : real(id));
+  const ok = await (await a.request('/v1/review-payees', json({ payee: 'X', by: 'shai' }))).json();
+  expect(ok).toMatchObject({ added: false, deletedRules: [{ id: 'r2' }], notDeleted: [{ id: 'r4' }] });
+});

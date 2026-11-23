@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { type ActualStore, StaleRowError } from '../actual/store.ts';
 import type { CuratorRow, CuratorRule, ReportRow, RuleOrigin } from '../actual/types.ts';
 import type { Config } from '../config.ts';
-import { categoryOf, isSupported, ruleForRow } from '../curator/rules.ts';
+import { categoryOf, isAlwaysReviewPayee, isSupported, ruleForRow } from '../curator/rules.ts';
 import { normPayee, type ReviewPayees } from '../curator/review-payees.ts';
 import type { RunSummary } from '../curator/run.ts';
 import type { DecisionLog } from '../log.ts';
@@ -150,8 +150,7 @@ export function createApp(deps: ApiDeps): Hono {
         .sort((a, b) => a.current.amount - b.current.amount), ...named(ex) });
   });
 
-  const isReviewPayee = (p: string | null | undefined) => Boolean(normPayee(p)) && vocab.reviewPayees.some(r => normPayee(r) === normPayee(p))
-    && !vocab.genericPayees.some(g => normPayee(g) === normPayee(p));
+  const isReviewPayee = (p: string | null | undefined) => isAlwaysReviewPayee(p, vocab);
 
   const setBody = z.object({
     category: z.string().min(1).optional(),
@@ -175,6 +174,8 @@ export function createApp(deps: ApiDeps): Hono {
     let ruleId: string | undefined;
     let ruleSkipped: 'review_payee' | undefined;
     if (body.category && body.rule) {
+      // Computed here, directly before replaceRule with no await between, so the always-review list is read as late as
+      // possible. Residual: an add() + sweep that lands while replaceRule itself is in flight can still lose to it.
       const rule = ruleForRow(row, body.category, vocab);
       if (!rule && isReviewPayee(row.importedPayee)) ruleSkipped = 'review_payee';
       if (rule) {
@@ -251,16 +252,30 @@ export function createApp(deps: ApiDeps): Hono {
     // The payee's plain rules would keep filing its rows at import, so they go; memo-keyed rules are a different thing.
     const lbl = await labels();
     const deletedRules: { id: string; categoryLabel?: string }[] = [];
-    for (const r of await store.rules()) {
-      const only = r.conditions.length === 1 && r.conditions[0].field === 'imported_payee' && r.conditions[0].op === 'is';
-      if (!only || normPayee(r.conditions[0].value) !== normPayee(b.payee)) continue;
-      if (!(await store.deleteRule(r.id))) continue;
-      await log.rules.forget(r.id);
-      const cat = categoryOf(r);
-      deletedRules.push({ id: r.id, ...(cat && lbl.get(cat) ? { categoryLabel: lbl.get(cat) } : {}) });
+    const notDeleted: { id: string }[] = [];
+    let failed: { id: string; message: string } | undefined;
+    try {
+      for (const r of await store.rules()) {
+        const only = r.conditions.length === 1 && r.conditions[0].field === 'imported_payee' && r.conditions[0].op === 'is';
+        if (!only || normPayee(r.conditions[0].value) !== normPayee(b.payee)) continue;
+        try {
+          if (!(await store.deleteRule(r.id))) { notDeleted.push({ id: r.id }); continue; }
+        } catch (e) {
+          failed = { id: r.id, message: (e as Error).message };
+          break;
+        }
+        await log.rules.forget(r.id);
+        const cat = categoryOf(r);
+        deletedRules.push({ id: r.id, ...(cat && lbl.get(cat) ? { categoryLabel: lbl.get(cat) } : {}) });
+      }
+    } finally {
+      if (deletedRules.length) await push(); // whatever was deleted must reach the server even if a later delete failed
     }
-    if (deletedRules.length) await push();
-    return c.json({ payee: b.payee, added, deletedRules });
+    if (failed) {
+      return c.json({ error: { code: 'partial_delete', message: `deleting rule ${failed.id} failed: ${failed.message}; ${deletedRules.length} rule(s) already deleted` },
+        payee: b.payee, added, deletedRules, failedRule: { id: failed.id }, notDeleted }, 502);
+    }
+    return c.json({ payee: b.payee, added, deletedRules, ...(notDeleted.length ? { notDeleted } : {}) });
   });
 
   app.delete('/review-payees/:payee', c => {

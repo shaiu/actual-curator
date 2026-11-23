@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -77,4 +77,23 @@ test('ruleForRow: no rule for an always-review non-generic payee (case/space-ins
   vocab.reviewPayees.push('BIT');
   expect(ruleForRow(row({ importedPayee: 'BIT', notes: 'לטובת: דנה.' }), 'c', vocab))
     .toEqual({ importedPayee: 'BIT', notesContains: 'דנה', categoryId: 'c' });
+});
+
+test('a failed save leaves memory, vocab and the file unchanged (add and remove)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rp-'));
+  const vocab = mk();
+  const rp = new ReviewPayees(dir, vocab);
+  rp.add('Amazon', 'shai', at);
+  const blocker = join(dir, 'blocker');
+  writeFileSync(blocker, 'x');
+  const broken = new ReviewPayees(join(blocker, 'sub'), mk()); // mkdir under a file fails
+  expect(() => broken.add('Ebay', 'shai', at)).toThrow();
+  expect(broken.list().map(p => p.payee)).toEqual(['היי ביז בע"מ']);
+  const v2 = mk();
+  const rp2 = new ReviewPayees(dir, v2);
+  rmSync(join(dir, 'review-payees.json'));
+  mkdirSync(join(dir, 'review-payees.json')); // rename onto a directory fails
+  expect(() => rp2.remove('Amazon')).toThrow();
+  expect(v2.reviewPayees).toEqual(['היי ביז בע"מ', 'Amazon']);
+  expect(rp2.list().map(p => p.payee)).toContain('Amazon');
 });
