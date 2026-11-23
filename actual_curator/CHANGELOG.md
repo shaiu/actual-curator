@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0
+
+- A payee can be marked "always review" (a store that sells many kinds of things): its rules are removed and its
+  transactions always wait for a person to categorize them.
+
 ## 0.4.1
 
 - Fewer false alarms: a category spent exactly to its budget now reads "used up" instead of "off pace".

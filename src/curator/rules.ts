@@ -3,8 +3,9 @@
 import type { CuratorRow, CuratorRule, NewCuratorRule } from '../actual/types.ts';
 import { parseTags } from '../notes.ts';
 import type { Vocabulary } from '../vocabulary.ts';
+import { normPayee } from './review-payees.ts';
 
-const norm = (v: unknown) => String(v ?? '').trim().toLocaleLowerCase();
+const norm = normPayee;
 
 export function categoryOf(rule: CuratorRule): string | undefined {
   const sets = rule.actions.filter(a => a.op === 'set' && a.field === 'category');
@@ -55,6 +56,12 @@ export function memoKeyPhrase(memo: string, patterns: string[]): string | undefi
   return undefined;
 }
 
+/** An always-review payee that is not generic: the one case where a payee-only rule must never exist. */
+export function isAlwaysReviewPayee(importedPayee: string | null | undefined, vocab: Vocabulary): boolean {
+  const p = norm(importedPayee);
+  return p !== '' && vocab.reviewPayees.some(r => norm(r) === p) && !vocab.genericPayees.some(g => norm(g) === p);
+}
+
 /**
  * The rule a human answer (or a promotion) creates for this row: the payee, plus, for a generic
  * payee, the memo key phrase or else the whole memo. Undefined when there is nothing to match on.
@@ -62,7 +69,11 @@ export function memoKeyPhrase(memo: string, patterns: string[]): string | undefi
 export function ruleForRow(row: CuratorRow, categoryId: string, vocab: Vocabulary): NewCuratorRule | undefined {
   const importedPayee = row.importedPayee?.trim();
   if (!importedPayee) return undefined;
-  if (!vocab.genericPayees.some(g => norm(g) === norm(importedPayee))) return { importedPayee, categoryId };
+  if (!vocab.genericPayees.some(g => norm(g) === norm(importedPayee))) {
+    // An always-review payee sells many kinds of things: a rule on the payee alone would file the next one wrongly.
+    if (isAlwaysReviewPayee(importedPayee, vocab)) return undefined;
+    return { importedPayee, categoryId };
+  }
   const known = new Set([...vocab.tags.map(t => t.tag), ...vocab.reserved]);
   const memo = parseTags(row.notes, known).memo.trim();
   const notesContains = memoKeyPhrase(memo, vocab.memoKeyPatterns) ?? memo;

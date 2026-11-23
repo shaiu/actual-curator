@@ -156,6 +156,7 @@ components:
       properties:
         id: { type: string }
         payee: { type: string }
+        payeeName: { type: string, description: "For a `payee is <id>` rule: the Actual payee name that id resolves to" }
         notesContains: { type: string }
         category: { type: string }
         categoryLabel: { type: string }
@@ -226,7 +227,7 @@ paths:
                 tags: { type: object, properties: { add: { type: array, items: { type: string } }, remove: { type: array, items: { type: string } } } }
                 rule: { type: boolean, default: true }
       responses:
-        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { transaction: { $ref: "#/components/schemas/Transaction" }, ruleId: { type: string } } } } } }
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { transaction: { $ref: "#/components/schemas/Transaction" }, ruleId: { type: string }, ruleSkipped: { type: string, enum: [review_payee], description: "rule was requested but the payee is always reviewed, so none was made" } } } } } }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
   /v1/review:
@@ -278,7 +279,7 @@ paths:
       responses:
         "200": { description: OK, content: { application/json: { schema: { type: object, properties: { rules: { type: array, items: { $ref: "#/components/schemas/Rule" } } } } } } }
     post:
-      summary: Create a rule "imported payee is X [and notes contain Y] → category"; replaces one with the same conditions
+      summary: Create a rule "imported payee is X [and notes contain Y] → category"; replaces one with the same conditions. 409 review_payee for a payee-only rule on an always-review payee
       requestBody:
         content:
           application/json:
@@ -300,6 +301,33 @@ paths:
       responses:
         "200": { description: OK }
         "404": { $ref: "#/components/responses/Error" }
+  /v1/review-payees:
+    get:
+      summary: Payees whose rows always go to review (no rule is ever made on the payee alone). `config` entries come from the curator's config; `api` entries from POST
+      responses:
+        "200": { description: "OK: {payees: [{payee, source: config|api, by?, at?}]}" }
+    post:
+      summary: Add a payee to the always-review list (case/space-insensitive; added=false when already listed). Deletes that payee's plain "imported payee is X" rules, never a memo-keyed one
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payee, by]
+              properties: { payee: { type: string }, by: { type: string } }
+      responses:
+        "200": { description: "OK: {payee, added, deletedRules: [{id, kind: imported_payee|payee_id, categoryLabel?}], otherRules: [{id, conditions}], notDeleted?: [{id}]}. Deleted: single-condition rules `imported payee is X` and `payee is <id>` whose Actual payee name equals X. otherRules mention the payee with more conditions and are left alone" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { description: "unknown_payee: no transaction in the last 365 days has X as its imported payee (a display name or typo)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "502": { description: "partial_delete: a rule delete failed; body also has payee, added, deletedRules (already deleted and pushed), failedRule {id}, notDeleted, otherRules" }
+  /v1/review-payees/{payee}:
+    delete:
+      summary: Remove an api-added payee (URL-encode the payee). 409 config_payee for one set in the curator config
+      parameters: [{ name: payee, in: path, required: true, schema: { type: string } }]
+      responses:
+        "200": { description: "OK: {removed}" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /v1/curate/run:
     post:
       summary: Run the curator now (waits for an in-flight run instead of starting a second)

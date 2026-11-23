@@ -302,3 +302,70 @@ test('answering a row a stale rule sent to review points that rule at the answer
   expect(store.retargeted).toEqual([{ id: 's1', categoryId: 'coffee' }]);
   expect((await log.lastFor('a1'))?.reason).toContain('rule s1 moved from hidden Needs / Old (hidden)');
 });
+
+test('an always-review payee: a human answer in Actual settles the row but makes no rule', async () => {
+  const v = parseVocabulary(`
+tags:
+  - { tag: kids, meaning: for a child }
+reviewPayees: [אמזון]
+`);
+  const r = row({ payee: 'אמזון ', importedPayee: 'אמזון ', category: 'gifts', notes: 'memo #auto #review' });
+  const { store, log } = setup([r]);
+  const s = await curate({ store, log, vocab: v, cfg, now, classifier: classifier(() => confident()) });
+  expect(s.settled).toBe(1);
+  expect(store.created).toEqual([]);
+});
+
+test('an always-review payee is never promoted even after repeated confident hits', async () => {
+  const v = parseVocabulary(`
+tags:
+  - { tag: kids, meaning: for a child }
+reviewPayees: [ארומה]
+`);
+  const { store, log } = setup([row(), row(), row(), row()]);
+  for (let i = 0; i < 3; i++) await log.append({ at: now().toISOString(), txId: `p${i}`, importedPayee: 'ארומה', memo: '', amount: 0,
+    kind: 'classified', before: { category: null, notes: '' }, after: { category: 'coffee', notes: '' },
+    classification: { category: { id: 'coffee', confidence: 0.97, probabilities: { coffee: 0.97 } }, tags: {}, raw: null }, dryRun: false });
+  const s = await curate({ store, log, vocab: v, cfg, now, classifier: classifier(() => confident()) });
+  expect(store.created).toEqual([]);
+  expect(s.promoted).toBe(0);
+});
+
+test('an always-review payee categorized by a rule: tagged #review keeping the category, and the next run does not settle it', async () => {
+  const v = parseVocabulary(`
+tags:
+  - { tag: kids, meaning: for a child }
+reviewPayees: [ארומה]
+`);
+  const r = row({ category: 'coffee', notes: 'memo' });
+  const { store, log } = setup([r]);
+  const c = classifier(() => tagsOnly());
+  await curate({ store, log, vocab: v, cfg, now, classifier: c });
+  expect(store.updates[0].fields).toEqual({ notes: 'memo #auto #review' });
+  const tagged = { ...r, notes: 'memo #auto #review' };
+  const second = setup([tagged]);
+  second.store.ruleList = [];
+  const log2 = log;
+  const s = await curate({ store: second.store, log: log2, vocab: v, cfg, now, classifier: c });
+  expect(s.settled).toBe(0);
+  expect(second.store.updates).toEqual([]);
+});
+
+test('a kept-category review row stays in review after its payee leaves always-review: no settle, no rule', async () => {
+  const v = parseVocabulary(`
+tags:
+  - { tag: kids, meaning: for a child }
+reviewPayees: [ארומה]
+`);
+  const r = row({ category: 'coffee', notes: 'memo' });
+  const { store, log } = setup([r]);
+  const c = classifier(() => tagsOnly());
+  await curate({ store, log, vocab: v, cfg, now, classifier: c });
+  v.reviewPayees.splice(0); // removed from always-review (e.g. actual_always_review remove)
+  const second = setup([{ ...r, notes: 'memo #auto #review' }]);
+  second.store.ruleList = [];
+  const s = await curate({ store: second.store, log, vocab: v, cfg, now, classifier: c });
+  expect(s.settled).toBe(0);
+  expect(second.store.created).toEqual([]);
+  expect(second.store.updates).toEqual([]);
+});

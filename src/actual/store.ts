@@ -157,6 +157,10 @@ export class ActualStore {
     return (await api.getAccounts()).map(a => ({ id: a.id, name: a.name, offbudget: Boolean(a.offbudget), closed: Boolean(a.closed) }));
   }
 
+  async payees(): Promise<{ id: string; name: string }[]> {
+    return (await api.getPayees()).map(p => ({ id: p.id, name: p.name }));
+  }
+
   /** Rows the curator may touch, minus the `#auto` check (the caller does that). */
   async candidates(opts: { lookbackDays: number; today?: Date }): Promise<CuratorRow[]> {
     const from = isoDay(new Date((opts.today ?? new Date()).getTime() - opts.lookbackDays * 864e5));
