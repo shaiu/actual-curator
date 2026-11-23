@@ -226,7 +226,7 @@ paths:
                 tags: { type: object, properties: { add: { type: array, items: { type: string } }, remove: { type: array, items: { type: string } } } }
                 rule: { type: boolean, default: true }
       responses:
-        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { transaction: { $ref: "#/components/schemas/Transaction" }, ruleId: { type: string } } } } } }
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { transaction: { $ref: "#/components/schemas/Transaction" }, ruleId: { type: string }, ruleSkipped: { type: string, enum: [review_payee], description: "rule was requested but the payee is always reviewed, so none was made" } } } } } }
         "400": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
   /v1/review:
