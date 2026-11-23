@@ -350,3 +350,22 @@ reviewPayees: [ארומה]
   expect(s.settled).toBe(0);
   expect(second.store.updates).toEqual([]);
 });
+
+test('a kept-category review row stays in review after its payee leaves always-review: no settle, no rule', async () => {
+  const v = parseVocabulary(`
+tags:
+  - { tag: kids, meaning: for a child }
+reviewPayees: [ארומה]
+`);
+  const r = row({ category: 'coffee', notes: 'memo' });
+  const { store, log } = setup([r]);
+  const c = classifier(() => tagsOnly());
+  await curate({ store, log, vocab: v, cfg, now, classifier: c });
+  v.reviewPayees.splice(0); // removed from always-review (e.g. actual_always_review remove)
+  const second = setup([{ ...r, notes: 'memo #auto #review' }]);
+  second.store.ruleList = [];
+  const s = await curate({ store: second.store, log, vocab: v, cfg, now, classifier: c });
+  expect(s.settled).toBe(0);
+  expect(second.store.created).toEqual([]);
+  expect(second.store.updates).toEqual([]);
+});

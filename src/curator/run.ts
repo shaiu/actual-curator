@@ -107,8 +107,9 @@ export async function curate(deps: CurateDeps): Promise<RunSummary> {
     try {
       if (hasTag(r.notes, 'review') && r.category) {
         // The curator itself tagged this row #review while keeping a rule's category (always-review payee):
-        // nobody has answered yet, so it is not settled until the category changes.
-        if (isAlwaysReviewPayee(r.importedPayee, vocab)) {
+        // nobody has answered yet, so it is not settled until the category changes. Keyed on the log record,
+        // not on the current list: a payee removed from always-review must not turn the kept category into an answer.
+        {
           const last = await log.lastFor(r.id, x => !x.dryRun && x.kind === 'review');
           if (last?.after?.category && last.after.category === r.category) continue;
         }
