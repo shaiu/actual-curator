@@ -43,6 +43,8 @@ class FakeStore implements ApiStore {
     const r = this.rows.find(x => x.id === id)!;
     Object.assign(r, fields);
   }
+  payeeList: { id: string; name: string }[] = [];
+  async payees() { return this.payeeList; }
   async rules() { return this.ruleList; }
   async replaceRule(r: NewCuratorRule) {
     const conds = [{ field: 'imported_payee', op: 'is', value: r.importedPayee },
@@ -251,6 +253,7 @@ reviewPayees: [Config Co]
 `);
   const rp = new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), v);
   const a = mkApp(rp, v);
+  store.rows.push(row({ id: 'seen1', importedPayee: 'היי ביז בע"מ' }));
   store.ruleList.push(payeeRule('r1', 'היי ביז בע"מ'), payeeRule('r2', 'היי ביז בע"מ', 'gifts', 'דנה'), payeeRule('r3', 'ארומה'),
     payeeRule('r4', ' היי ביז בע"מ ', 'dining'));
   for (const id of ['r1', 'r4']) await log.rules.record(id, 'human', { importedPayee: 'x' });
@@ -258,7 +261,8 @@ reviewPayees: [Config Co]
   const r = await a.request('/v1/review-payees', json({ payee: 'היי ביז בע"מ  ', by: 'shai' }));
   expect(r.status).toBe(200);
   expect(await r.json()).toEqual({ payee: 'היי ביז בע"מ', added: true,
-    deletedRules: [{ id: 'r1', categoryLabel: 'Needs / Coffee' }, { id: 'r4', categoryLabel: 'Wants / Dining' }] });
+    deletedRules: [{ id: 'r1', kind: 'imported_payee', categoryLabel: 'Needs / Coffee' }, { id: 'r4', kind: 'imported_payee', categoryLabel: 'Wants / Dining' }],
+    otherRules: [{ id: 'r2', conditions: expect.any(Array) }] });
   expect(store.ruleList.map(x => x.id)).toEqual(['r2', 'r3']);
   expect(store.syncs).toBe(syncs + 1);
   expect(await log.rules.originOf('r1')).toBeUndefined();
@@ -279,6 +283,7 @@ tags:
 reviewPayees: [Config Co]
 `);
   const a = mkApp(new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), v), v);
+  store.rows.push(row({ id: 'seen1', importedPayee: 'היי ביז בע"מ' }));
   await a.request('/v1/review-payees', json({ payee: 'היי ביז בע"מ', by: 'shai' }));
   const del = (p: string) => a.request(`/v1/review-payees/${encodeURIComponent(p)}`, { method: 'DELETE', headers: auth });
   const ok = await del('היי ביז בע"מ');
@@ -299,6 +304,7 @@ reviewPayees: [PAYBOX]
 `);
   const rp = new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), v);
   const a = mkApp(rp, v);
+  store.rows.push(row({ id: 'seen1', importedPayee: 'היי ביז' }));
   await a.request('/v1/review-payees', json({ payee: 'היי ביז', by: 'shai' }));
   store.rows.push(row({ id: 'h1', payee: 'Hi Biz', importedPayee: 'היי ביז ', notes: 'm #auto #review' }),
     row({ id: 'b1', payee: 'PAYBOX', importedPayee: 'PAYBOX', notes: 'לטובת: דנה.' }));
@@ -307,7 +313,7 @@ reviewPayees: [PAYBOX]
   expect(body.ruleSkipped).toBe('review_payee');
   expect(body.ruleId).toBeUndefined();
   expect(store.ruleList).toEqual([]);
-  expect(store.rows[0]).toMatchObject({ category: 'gifts' });
+  expect(store.rows.find(x => x.id === 'h1')).toMatchObject({ category: 'gifts' });
   // a generic payee that is also always-review keeps its memo rule
   const g = await (await a.request('/v1/transactions/b1', json({ category: 'gifts' }))).json();
   expect(g.ruleId).toBeDefined();
@@ -320,6 +326,7 @@ reviewPayees: [PAYBOX]
 test('POST /rules: a plain payee rule for an always-review payee is 409 review_payee; a memo rule is allowed', async () => {
   const rp = new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), vocab);
   const a = mkApp(rp);
+  store.rows.push(row({ id: 'seen1', importedPayee: 'היי ביז' }));
   await a.request('/v1/review-payees', json({ payee: 'היי ביז', by: 'shai' }));
   const bad = await a.request('/v1/rules', json({ payee: ' היי ביז ', category: 'coffee' }));
   expect(bad.status).toBe(409);
@@ -339,6 +346,7 @@ test('transaction and review views expose the imported payee beside the Actual p
 test('review-payees POST: a deleteRule that throws still pushes what was deleted and reports it; a false return is reported', async () => {
   const rp = new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), vocab);
   const a = mkApp(rp);
+  store.rows.push(row({ id: 'seen1', importedPayee: 'X' }));
   store.ruleList.push(payeeRule('r1', 'X', 'coffee'), payeeRule('r2', 'X', 'gifts'), payeeRule('r3', 'X', 'dining'), payeeRule('r4', 'X', 'groc'));
   const real = store.deleteRule.bind(store);
   store.deleteRule = async (id: string) => { if (id === 'r2') return false; if (id === 'r3') throw new Error('boom'); return real(id); };
@@ -347,11 +355,48 @@ test('review-payees POST: a deleteRule that throws still pushes what was deleted
   expect(res.status).toBe(502);
   const body = await res.json();
   expect(body.error.code).toBe('partial_delete');
-  expect(body).toMatchObject({ payee: 'X', added: true, deletedRules: [{ id: 'r1', categoryLabel: 'Needs / Coffee' }],
+  expect(body).toMatchObject({ payee: 'X', added: true, deletedRules: [{ id: 'r1', kind: 'imported_payee', categoryLabel: 'Needs / Coffee' }],
     failedRule: { id: 'r3' }, notDeleted: [{ id: 'r2' }] });
   expect(store.syncs).toBe(syncs + 1);
   // no throw: a false return shows up as notDeleted in a 200
   store.deleteRule = async (id: string) => (id === 'r4' ? false : real(id));
   const ok = await (await a.request('/v1/review-payees', json({ payee: 'X', by: 'shai' }))).json();
   expect(ok).toMatchObject({ added: false, deletedRules: [{ id: 'r2' }, { id: 'r3' }], notDeleted: [{ id: 'r4' }] });
+});
+
+const idRule = (id: string, payeeId: string, cat = 'groc'): CuratorRule => ({ id, stage: null, conditionsOp: 'and',
+  conditions: [{ field: 'payee', op: 'is', value: payeeId }], actions: [{ field: 'category', op: 'set', value: cat }] });
+
+test('review-payees POST: also deletes the single-condition payee-id rule whose payee name matches; lists multi-condition mentions as otherRules', async () => {
+  const a = mkApp(new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), vocab));
+  store.rows.push(row({ id: 'seen1', importedPayee: 'היי ביז בע"מ' }));
+  store.payeeList = [{ id: 'p-hb', name: 'היי  ביז בע"מ ' }, { id: 'p-other', name: 'ארומה' }];
+  store.ruleList.push(payeeRule('ae', 'היי ביז בע"מ', 'groc'), idRule('pid', 'p-hb'), idRule('other', 'p-other', 'coffee'),
+    { ...idRule('multi', 'p-hb'), conditions: [{ field: 'payee', op: 'is', value: 'p-hb' }, { field: 'amount', op: 'lt', value: 0 }] },
+    payeeRule('memo', 'היי ביז בע"מ', 'gifts', 'דנה'));
+  const body = await (await a.request('/v1/review-payees', json({ payee: 'היי ביז בע"מ', by: 'shai' }))).json();
+  expect(body.deletedRules).toEqual([{ id: 'ae', kind: 'imported_payee', categoryLabel: 'Needs / Groceries' },
+    { id: 'pid', kind: 'payee_id', categoryLabel: 'Needs / Groceries' }]);
+  expect(body.otherRules.map((r: { id: string }) => r.id)).toEqual(['multi', 'memo']);
+  expect(body.otherRules[0].conditions).toHaveLength(2);
+  expect(store.ruleList.map(r => r.id)).toEqual(['other', 'multi', 'memo']);
+});
+
+test('review-payees POST: 404 unknown_payee when no transaction in the last 365 days has that imported payee', async () => {
+  const rp = new ReviewPayees(mkdtempSync(join(tmpdir(), 'rp-')), vocab);
+  const a = mkApp(rp);
+  store.rows.push(row({ id: 's1', payee: 'Display Name', importedPayee: 'היי ביז בע"מ' }));
+  const bad = await a.request('/v1/review-payees', json({ payee: 'Display Name', by: 'shai' }));
+  expect(bad.status).toBe(404);
+  expect((await bad.json()).error.code).toBe('unknown_payee');
+  expect(rp.list().filter(p => p.source === 'api')).toEqual([]);
+  expect((await a.request('/v1/review-payees', json({ payee: ' היי  ביז בע"מ', by: 'shai' }))).status).toBe(200);
+});
+
+test('GET /rules: a payee-id rule carries payeeName', async () => {
+  store.payeeList = [{ id: 'p-hb', name: 'היי ביז' }];
+  store.ruleList.push(idRule('pid', 'p-hb'), idRule('gone', 'p-missing'));
+  const { rules } = await (await app.request('/v1/rules', { headers: auth })).json();
+  expect(rules.find((r: { id: string }) => r.id === 'pid').payeeName).toBe('היי ביז');
+  expect(rules.find((r: { id: string }) => r.id === 'gone').payeeName).toBeUndefined();
 });

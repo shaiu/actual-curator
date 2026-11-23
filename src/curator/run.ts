@@ -8,7 +8,8 @@ import type { Decision, DecisionLog } from '../log.ts';
 import { hasTag, parseTags, withTags } from '../notes.ts';
 import type { Vocabulary } from '../vocabulary.ts';
 import { decide } from './decide.ts';
-import { categoryOf, firstMatch, ruleForRow, staleRulesFor } from './rules.ts';
+import { normPayee } from './review-payees.ts';
+import { categoryOf, firstMatch, isAlwaysReviewPayee, ruleForRow, staleRulesFor } from './rules.ts';
 
 export type CuratorStore = Pick<ActualStore, 'sync' | 'candidates' | 'categories' | 'rules' | 'priorCategories'
   | 'update' | 'createRule' | 'replaceRule' | 'deleteRule' | 'retargetRule'>;
@@ -33,7 +34,7 @@ export type CurateDeps = {
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October',
   'November', 'December'];
-const norm = (s: string | null | undefined) => (s ?? '').trim().toLocaleLowerCase();
+const norm = normPayee;
 
 export async function curate(deps: CurateDeps): Promise<RunSummary> {
   const { store, classifier, log, vocab, cfg } = deps;
@@ -105,6 +106,12 @@ export async function curate(deps: CurateDeps): Promise<RunSummary> {
   for (const r of rows) {
     try {
       if (hasTag(r.notes, 'review') && r.category) {
+        // The curator itself tagged this row #review while keeping a rule's category (always-review payee):
+        // nobody has answered yet, so it is not settled until the category changes.
+        if (isAlwaysReviewPayee(r.importedPayee, vocab)) {
+          const last = await log.lastFor(r.id, x => !x.dryRun && x.kind === 'review');
+          if (last?.after?.category && last.after.category === r.category) continue;
+        }
         if (await decidedInDryRun(r, ['settled-review'])) continue;
         const rule = ruleForRow(r, r.category, vocab);
         let reason = 'answered in Actual';
@@ -204,7 +211,7 @@ export async function curate(deps: CurateDeps): Promise<RunSummary> {
         s.classified++;
         // 4. Promotion: a machine answer becomes a rule only after repeated agreement, never for generic payees.
         const payee = r.importedPayee?.trim();
-        if (!cfg.dryRun && payee && !generic.has(norm(payee)) && !vocab.reviewPayees.some(x => norm(x) === norm(payee)) && d.category && !firstMatch(rules, r)
+        if (!cfg.dryRun && payee && !generic.has(norm(payee)) && !isAlwaysReviewPayee(payee, vocab) && d.category && !firstMatch(rules, r)
           && (await log.confidentHits(payee, d.category)) >= cfg.promoteAfter) {
           const id = await store.createRule({ importedPayee: payee, categoryId: d.category });
           changed = true;

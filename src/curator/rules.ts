@@ -3,8 +3,9 @@
 import type { CuratorRow, CuratorRule, NewCuratorRule } from '../actual/types.ts';
 import { parseTags } from '../notes.ts';
 import type { Vocabulary } from '../vocabulary.ts';
+import { normPayee } from './review-payees.ts';
 
-const norm = (v: unknown) => String(v ?? '').trim().toLocaleLowerCase();
+const norm = normPayee;
 
 export function categoryOf(rule: CuratorRule): string | undefined {
   const sets = rule.actions.filter(a => a.op === 'set' && a.field === 'category');

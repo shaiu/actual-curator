@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import type { CuratorRow } from '../../src/actual/types.ts';
-import { ReviewPayees } from '../../src/curator/review-payees.ts';
+import { normPayee, ReviewPayees } from '../../src/curator/review-payees.ts';
 import { ruleForRow } from '../../src/curator/rules.ts';
 import { parseVocabulary } from '../../src/vocabulary.ts';
 
@@ -96,4 +96,23 @@ test('a failed save leaves memory, vocab and the file unchanged (add and remove)
   expect(() => rp2.remove('Amazon')).toThrow();
   expect(v2.reviewPayees).toEqual(['היי ביז בע"מ', 'Amazon']);
   expect(rp2.list().map(p => p.payee)).toContain('Amazon');
+});
+
+test('a corrupt file is renamed aside with a console.error, and the list continues empty', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'rp-'));
+  writeFileSync(join(dir, 'review-payees.json'), '{not json');
+  const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const rp = new ReviewPayees(dir, mk());
+  expect(err).toHaveBeenCalled();
+  err.mockRestore();
+  expect(rp.list()).toHaveLength(1);
+  const files = readdirSync(dir);
+  expect(files.some(f => f.startsWith('review-payees.json.corrupt-'))).toBe(true);
+  expect(files).not.toContain('review-payees.json');
+  expect(rp.add('Amazon', 'shai', at)).toBe(true);
+});
+
+test('normPayee collapses whitespace runs and ignores case', () => {
+  expect(normPayee('  Hi   BIZ \t x ')).toBe('hi biz x');
+  expect(ruleForRow(row({ importedPayee: 'היי   ביז בע"מ' }), 'c', mk())).toBeUndefined();
 });

@@ -66,7 +66,18 @@ test('a review payee always goes to review, even with a confident answer; a rule
   const p = { payee: 'Paybox', importedPayee: ' paybox ' };
   expect(run(row(p), cls({ id: 'coffee', confidence: 0.99, probabilities: { coffee: 0.99 } }, { kids: 0.8 })))
     .toEqual({ category: null, addTags: ['kids', 'auto', 'review'], review: true, kind: 'review', reason: 'payee paybox is always reviewed' });
-  expect(run(row({ ...p, category: 'coffee' }), cls(undefined)).kind).toBe('rule-hit');
+});
+
+test('an always-review payee whose row a rule already categorized: tagged for review, category kept', () => {
+  const p = { payee: 'Paybox', importedPayee: ' PAYBOX ', category: 'coffee' };
+  expect(run(row(p), cls(undefined))).toEqual({ category: 'coffee', addTags: ['auto', 'review'], review: true, kind: 'review',
+    reason: 'payee paybox is always reviewed (category from a rule kept)' });
+  // a double-spaced imported payee still matches
+  const v2 = parseVocabulary('tags:\n  - { tag: kids, meaning: x }\nreviewPayees: [\"two words\"]\n');
+  expect(decide({ row: row({ importedPayee: 'Two   Words', category: 'coffee' }), classification: cls(undefined), vocab: v2, thresholds, categories }))
+    .toMatchObject({ review: true, category: 'coffee' });
+  // a non-review payee with a rule is still a rule hit
+  expect(run(row({ category: 'coffee' }), cls(undefined)).kind).toBe('rule-hit');
 });
 
 test('a row already in a hidden category goes to review, uncategorized, naming the category', () => {

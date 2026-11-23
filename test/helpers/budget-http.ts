@@ -74,6 +74,7 @@ export class FakeStore implements ApiStore {
   async transaction() { return undefined; }
   async update() {}
   async rules() { return []; }
+  async payees() { return [] as { id: string; name: string }[]; }
   async replaceRule() { return 'r'; }
   async deleteRule() { return false; }
   async spend() { return []; }

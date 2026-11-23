@@ -3,6 +3,8 @@ import type { CuratorRow } from '../actual/types.ts';
 import type { CategoryOption, Classification } from '../classifier/types.ts';
 import type { DecisionKind } from '../log.ts';
 import type { Vocabulary } from '../vocabulary.ts';
+import { normPayee } from './review-payees.ts';
+import { isAlwaysReviewPayee } from './rules.ts';
 
 export type Thresholds = { category: number; tagDefault: number; exclusive: number };
 
@@ -33,10 +35,18 @@ export function decide(input: { row: CuratorRow; classification: Classification 
   if (row.category && !categories.some(x => x.id === row.category)) {
     return review(`category ${input.labels?.get(row.category) ?? row.category} is hidden`);
   }
-  if (row.category) return { category: row.category, addTags: [...tags, 'auto'], review: false, kind: 'rule-hit' };
-
-  const payee = (row.importedPayee ?? '').trim().toLocaleLowerCase();
-  if (vocab.reviewPayees.some(p => p.trim().toLocaleLowerCase() === payee)) return review(`payee ${payee} is always reviewed`);
+  const payee = normPayee(row.importedPayee);
+  const always = vocab.reviewPayees.some(p => normPayee(p) === payee);
+  if (row.category) {
+    // A rule already filed this row (Actual applies rules at import). For an always-review payee that filing is exactly
+    // what the human wants to see: keep the category and tag the row, so the review list shows it with its category.
+    if (always && isAlwaysReviewPayee(row.importedPayee, vocab)) {
+      return { category: row.category, addTags: [...tags, 'auto', 'review'], review: true, kind: 'review',
+        reason: `payee ${payee} is always reviewed (category from a rule kept)` };
+    }
+    return { category: row.category, addTags: [...tags, 'auto'], review: false, kind: 'rule-hit' };
+  }
+  if (always) return review(`payee ${payee} is always reviewed`);
   if (!c.category) return review('no category answer');
   if (c.category.confidence < thresholds.category) {
     return review(`confidence ${c.category.confidence.toFixed(2)} below ${thresholds.category}`);

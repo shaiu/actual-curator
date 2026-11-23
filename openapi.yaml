@@ -156,6 +156,7 @@ components:
       properties:
         id: { type: string }
         payee: { type: string }
+        payeeName: { type: string, description: "For a `payee is <id>` rule: the Actual payee name that id resolves to" }
         notesContains: { type: string }
         category: { type: string }
         categoryLabel: { type: string }
@@ -315,9 +316,10 @@ paths:
               required: [payee, by]
               properties: { payee: { type: string }, by: { type: string } }
       responses:
-        "200": { description: "OK: {payee, added, deletedRules: [{id, categoryLabel?}], notDeleted?: [{id}]}" }
+        "200": { description: "OK: {payee, added, deletedRules: [{id, kind: imported_payee|payee_id, categoryLabel?}], otherRules: [{id, conditions}], notDeleted?: [{id}]}. Deleted: single-condition rules `imported payee is X` and `payee is <id>` whose Actual payee name equals X. otherRules mention the payee with more conditions and are left alone" }
         "400": { $ref: "#/components/responses/Error" }
-        "502": { description: "partial_delete: a rule delete failed; body also has payee, added, deletedRules (already deleted and pushed), failedRule {id}, notDeleted" }
+        "404": { description: "unknown_payee: no transaction in the last 365 days has X as its imported payee (a display name or typo)", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "502": { description: "partial_delete: a rule delete failed; body also has payee, added, deletedRules (already deleted and pushed), failedRule {id}, notDeleted, otherRules" }
   /v1/review-payees/{payee}:
     delete:
       summary: Remove an api-added payee (URL-encode the payee). 409 config_payee for one set in the curator config

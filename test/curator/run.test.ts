@@ -330,3 +330,23 @@ reviewPayees: [ארומה]
   expect(store.created).toEqual([]);
   expect(s.promoted).toBe(0);
 });
+
+test('an always-review payee categorized by a rule: tagged #review keeping the category, and the next run does not settle it', async () => {
+  const v = parseVocabulary(`
+tags:
+  - { tag: kids, meaning: for a child }
+reviewPayees: [ארומה]
+`);
+  const r = row({ category: 'coffee', notes: 'memo' });
+  const { store, log } = setup([r]);
+  const c = classifier(() => tagsOnly());
+  await curate({ store, log, vocab: v, cfg, now, classifier: c });
+  expect(store.updates[0].fields).toEqual({ notes: 'memo #auto #review' });
+  const tagged = { ...r, notes: 'memo #auto #review' };
+  const second = setup([tagged]);
+  second.store.ruleList = [];
+  const log2 = log;
+  const s = await curate({ store: second.store, log: log2, vocab: v, cfg, now, classifier: c });
+  expect(s.settled).toBe(0);
+  expect(second.store.updates).toEqual([]);
+});

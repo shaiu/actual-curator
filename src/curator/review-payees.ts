@@ -8,7 +8,8 @@ import type { Vocabulary } from '../vocabulary.ts';
 export type ReviewPayeeEntry = { payee: string; source: 'config' | 'api'; by?: string; at?: string };
 type Stored = { payee: string; by: string; at: string };
 
-export const normPayee = (v: unknown) => String(v ?? '').trim().toLocaleLowerCase();
+/** The one payee normalizer: trim, collapse whitespace runs, lowercase. Everything that compares payees uses it. */
+export const normPayee = (v: unknown) => String(v ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 
 export class ReviewPayees {
   private readonly file: string;
@@ -29,7 +30,9 @@ export class ReviewPayees {
           }
         }
       } catch (e) {
-        console.error(`ignoring unreadable ${this.file}: ${(e as Error).message}`);
+        const aside = `${this.file}.corrupt-${Date.now()}`;
+        try { renameSync(this.file, aside); } catch { /* best effort: the list still continues empty */ }
+        console.error(`unreadable ${this.file} (${(e as Error).message}); moved to ${aside}, starting empty`);
       }
     }
     this.sync();

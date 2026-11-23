@@ -18,7 +18,7 @@ import { exclusionResolver } from './exclusions.ts';
 import { money } from './format.ts';
 
 export type ApiStore = Pick<ActualStore, 'sync' | 'categories' | 'transactions' | 'transaction' | 'update' | 'rules'
-  | 'replaceRule' | 'deleteRule' | 'spend' | 'income' | 'budgetMonth' | 'budgetMonths' | 'setBudgeted' | 'accounts'>;
+  | 'replaceRule' | 'deleteRule' | 'payees' | 'spend' | 'income' | 'budgetMonth' | 'budgetMonths' | 'setBudgeted' | 'accounts'>;
 
 export type ApiStatus = { lastSyncAt?: string; lastRunAt?: string; lastRunOk?: boolean };
 
@@ -206,11 +206,13 @@ export function createApp(deps: ApiDeps): Hono {
       ...(ruleSkipped ? { ruleSkipped } : {}) });
   });
 
-  const ruleView = async (r: CuratorRule, lbl: Map<string, string>, visible?: Set<string>) => {
+  const ruleView = async (r: CuratorRule, lbl: Map<string, string>, visible?: Set<string>, payeeNames?: Map<string, string>) => {
     const payee = r.conditions.find(x => x.field === 'imported_payee' && x.op === 'is')?.value;
     const notesContains = r.conditions.find(x => x.field === 'notes' && x.op === 'contains')?.value;
     const category = categoryOf(r);
-    return { id: r.id, ...(payee !== undefined ? { payee } : {}), ...(notesContains !== undefined ? { notesContains } : {}),
+    const idCond = r.conditions.find(x => x.field === 'payee' && x.op === 'is')?.value;
+    const payeeName = typeof idCond === 'string' ? payeeNames?.get(idCond) : undefined;
+    return { id: r.id, ...(payee !== undefined ? { payee } : {}), ...(payeeName !== undefined ? { payeeName } : {}), ...(notesContains !== undefined ? { notesContains } : {}),
       ...(category ? { category, categoryLabel: lbl.get(category), ...(visible ? { categoryHidden: !visible.has(category) } : {}) } : {}),
       origin: (await log.rules.originOf(r.id)) ?? null, supported: isSupported(r), conditions: r.conditions, actions: r.actions };
   };
@@ -218,7 +220,8 @@ export function createApp(deps: ApiDeps): Hono {
   app.get('/rules', async c => {
     const lbl = await labels();
     const visible = new Set((await store.categories()).map(x => x.id));
-    return c.json({ rules: await Promise.all((await store.rules()).map(r => ruleView(r, lbl, visible))) });
+    const names = new Map((await store.payees()).map(p => [p.id, p.name]));
+    return c.json({ rules: await Promise.all((await store.rules()).map(r => ruleView(r, lbl, visible, names))) });
   });
 
   app.post('/rules', async c => {
@@ -248,16 +251,38 @@ export function createApp(deps: ApiDeps): Hono {
 
   app.post('/review-payees', async c => {
     const b = z.object({ payee: z.string().trim().min(1), by: z.string().trim().min(1) }).parse(await c.req.json().catch(() => ({})));
+    // Only a name some real transaction carries as its *imported* payee can match anything; a display name or a typo
+    // would be accepted silently and never fire.
+    const since = iso(new Date(now().getTime() - 365 * 864e5));
+    const seen = (await store.transactions({ from: since, to: iso(now()), limit: 100_000 })).some(r => normPayee(r.importedPayee) === normPayee(b.payee));
+    if (!seen) throw new ApiError(404, 'unknown_payee', `No transaction in the last 365 days has the imported payee "${b.payee}"; use the importedPayee field of a transaction, not its payee name`);
     const added = deps.reviewPayees.add(b.payee, b.by, now());
-    // The payee's plain rules would keep filing its rows at import, so they go; memo-keyed rules are a different thing.
+    // The payee's plain rules would keep filing its rows at import, so they go; memo-keyed or multi-condition rules are
+    // a different thing and are only reported. Actual's payee-id rules (YNAB-era) match by the payee's NAME here.
     const lbl = await labels();
-    const deletedRules: { id: string; categoryLabel?: string }[] = [];
+    const names = new Map((await store.payees()).map(p => [p.id, p.name]));
+    const target = normPayee(b.payee);
+    const deletedRules: { id: string; kind: 'imported_payee' | 'payee_id'; categoryLabel?: string }[] = [];
     const notDeleted: { id: string }[] = [];
+    const otherRules: { id: string; conditions: CuratorRule['conditions'] }[] = [];
     let failed: { id: string; message: string } | undefined;
+    const kindOf = (r: CuratorRule): 'imported_payee' | 'payee_id' | undefined => {
+      if (r.conditions.length !== 1) return undefined;
+      const x = r.conditions[0];
+      if (x.op !== 'is') return undefined;
+      if (x.field === 'imported_payee' && normPayee(x.value) === target) return 'imported_payee';
+      if (x.field === 'payee' && typeof x.value === 'string' && normPayee(names.get(x.value)) === target) return 'payee_id';
+      return undefined;
+    };
+    const mentions = (r: CuratorRule) => r.conditions.some(x => (x.field === 'imported_payee' && normPayee(x.value) === target)
+      || (x.field === 'payee' && typeof x.value === 'string' && normPayee(names.get(x.value)) === target));
     try {
       for (const r of await store.rules()) {
-        const only = r.conditions.length === 1 && r.conditions[0].field === 'imported_payee' && r.conditions[0].op === 'is';
-        if (!only || normPayee(r.conditions[0].value) !== normPayee(b.payee)) continue;
+        const kind = kindOf(r);
+        if (!kind) {
+          if (mentions(r)) otherRules.push({ id: r.id, conditions: r.conditions });
+          continue;
+        }
         try {
           if (!(await store.deleteRule(r.id))) { notDeleted.push({ id: r.id }); continue; }
         } catch (e) {
@@ -266,16 +291,16 @@ export function createApp(deps: ApiDeps): Hono {
         }
         await log.rules.forget(r.id);
         const cat = categoryOf(r);
-        deletedRules.push({ id: r.id, ...(cat && lbl.get(cat) ? { categoryLabel: lbl.get(cat) } : {}) });
+        deletedRules.push({ id: r.id, kind, ...(cat && lbl.get(cat) ? { categoryLabel: lbl.get(cat) } : {}) });
       }
     } finally {
       if (deletedRules.length) await push(); // whatever was deleted must reach the server even if a later delete failed
     }
     if (failed) {
       return c.json({ error: { code: 'partial_delete', message: `deleting rule ${failed.id} failed: ${failed.message}; ${deletedRules.length} rule(s) already deleted` },
-        payee: b.payee, added, deletedRules, failedRule: { id: failed.id }, notDeleted }, 502);
+        payee: b.payee, added, deletedRules, failedRule: { id: failed.id }, notDeleted, otherRules }, 502);
     }
-    return c.json({ payee: b.payee, added, deletedRules, ...(notDeleted.length ? { notDeleted } : {}) });
+    return c.json({ payee: b.payee, added, deletedRules, otherRules, ...(notDeleted.length ? { notDeleted } : {}) });
   });
 
   app.delete('/review-payees/:payee', c => {
