@@ -353,5 +353,5 @@ test('review-payees POST: a deleteRule that throws still pushes what was deleted
   // no throw: a false return shows up as notDeleted in a 200
   store.deleteRule = async (id: string) => (id === 'r4' ? false : real(id));
   const ok = await (await a.request('/v1/review-payees', json({ payee: 'X', by: 'shai' }))).json();
-  expect(ok).toMatchObject({ added: false, deletedRules: [{ id: 'r2' }], notDeleted: [{ id: 'r4' }] });
+  expect(ok).toMatchObject({ added: false, deletedRules: [{ id: 'r2' }, { id: 'r3' }], notDeleted: [{ id: 'r4' }] });
 });
