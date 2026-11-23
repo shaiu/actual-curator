@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0 — always-review payees
+
+- API-managed always-review list on top of the config `reviewPayees`: `GET/POST/DELETE /v1/review-payees`,
+  persisted in `<dataDir>/review-payees.json`. Adding a payee deletes its single-condition rules, both
+  `imported_payee is` and Actual `payee is <id>` (`deletedRules[].kind`); multi-condition rules that mention it come
+  back as `otherRules`. A payee no transaction in the last 365 days was imported under is refused (404 `unknown_payee`);
+  a config-only payee cannot be removed (409 `config_payee`); a failed delete midway is 502 `partial_delete`.
+- An always-review row that a rule already categorized is tagged `#review` with its category kept, and stays in review
+  until answered (even after the payee leaves the list).
+- Answering an always-review row creates no plain rule (`ruleSkipped: 'review_payee'`); `POST /v1/rules` without
+  `notesContains` for one is 409 `review_payee`; promotion skips them.
+- Payee names are compared trimmed, lower-cased and with whitespace runs collapsed, everywhere.
+- `GET /v1/rules` adds `payeeName` for rules keyed on an Actual payee id.
+
 ## 0.4.1 — fewer false alarms
 
 - `pace()`: a variable line spent exactly to its budget (balance 0, spent > 0) is `watch` ("used up"), never `off`;
