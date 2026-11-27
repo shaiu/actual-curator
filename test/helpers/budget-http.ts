@@ -5,7 +5,7 @@ import { BudgetWriteUnconfirmedError } from '../../src/actual/store.ts';
 import type { CuratorRow } from '../../src/actual/types.ts';
 import type { CategoryOption } from '../../src/classifier/types.ts';
 import { BudgetFiles } from '../../src/budget/plan-store.ts';
-import type { MonthSnapshot, PlanInput } from '../../src/budget/types.ts';
+import type { MonthSnapshot, MonthTotals, PlanInput } from '../../src/budget/types.ts';
 import { type ApiStore, createApp } from '../../src/http/app.ts';
 import { ReviewPayees } from '../../src/curator/review-payees.ts';
 import { DecisionLog } from '../../src/log.ts';
@@ -56,6 +56,15 @@ export class FakeStore implements ApiStore {
   syncs = 0;
   onSync: (() => void) | undefined;
   months = ['2026-10', '2026-11', '2026-12'];
+  totals = new Map<string, MonthTotals>();
+  balances: Awaited<ReturnType<ApiStore['accountBalances']>> = [];
+  firstMonth: string | null = '2026-01';
+  async monthTotals(month: string): Promise<MonthTotals> {
+    return structuredClone(this.totals.get(month) ?? { carryOverIn: 0, income: 0, lastMonthOverspent: 0, budgeted: 0,
+      spent: 0, toBudget: (await this.budgetMonth(month)).toBudget });
+  }
+  async accountBalances() { return structuredClone(this.balances); }
+  async firstTransactionMonth() { return this.firstMonth; }
   async sync() {
     this.syncs++;
     if (this.failSync) throw new Error('server unreachable');

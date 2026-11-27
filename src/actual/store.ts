@@ -1,5 +1,5 @@
 import * as api from '@actual-app/api';
-import type { MonthSnapshot } from '../budget/types.ts';
+import type { MonthSnapshot, MonthTotals } from '../budget/types.ts';
 import type { CategoryOption } from '../classifier/types.ts';
 import { parseTags } from '../notes.ts';
 import type { CuratorRow, CuratorRule, NewCuratorRule, ReportRow, RuleAction, RuleCondition } from './types.ts';
@@ -128,6 +128,31 @@ export class ActualStore {
       }
     }
     return { month, toBudget: m.toBudget, categories };
+  }
+
+  async monthTotals(month: string): Promise<MonthTotals> {
+    const m = await api.getBudgetMonth(month);
+    // The API's budgeted and spent totals are negative in the normal case; `0 -` avoids -0.
+    return { carryOverIn: m.fromLastMonth, income: m.totalIncome, lastMonthOverspent: m.lastMonthOverspent,
+      budgeted: 0 - m.totalBudgeted, spent: 0 - m.totalSpent, toBudget: m.toBudget };
+  }
+
+  /** Every account, closed ones included, with its current balance. */
+  async accountBalances(): Promise<{ id: string; name: string; offbudget: boolean; closed: boolean; balance: number }[]> {
+    const out = [];
+    for (const a of await this.accounts()) {
+      out.push({ id: a.id, name: a.name, offbudget: a.offbudget, closed: Boolean(a.closed),
+        balance: await api.getAccountBalance(a.id) });
+    }
+    return out;
+  }
+
+  /** YYYY-MM of the earliest on-budget transaction, or null for an empty budget. */
+  async firstTransactionMonth(): Promise<string | null> {
+    const [first] = await this.query(api.q('transactions')
+      .filter({ 'account.offbudget': false, is_parent: false })
+      .options({ splits: 'all' }).select(['date']).orderBy({ date: 'asc' }).limit(1));
+    return first ? (first.date as string).slice(0, 7) : null;
   }
 
   /**

@@ -69,4 +69,8 @@ export type CategoryMonth = {
   carryover?: boolean;
   budgeted: number; spent: number /* <= 0 */; balance: number;
 };
+/** Actual's own totals for one month. `budgeted` and `spent` are positive in the normal case. */
+export type MonthTotals = {
+  carryOverIn: number; income: number; lastMonthOverspent: number; budgeted: number; spent: number; toBudget: number;
+};
 export type MonthSnapshot = { month: string; toBudget: number; categories: CategoryMonth[] };

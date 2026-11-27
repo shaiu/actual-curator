@@ -18,7 +18,8 @@ import { exclusionResolver } from './exclusions.ts';
 import { money } from './format.ts';
 
 export type ApiStore = Pick<ActualStore, 'sync' | 'categories' | 'transactions' | 'transaction' | 'update' | 'rules'
-  | 'replaceRule' | 'deleteRule' | 'payees' | 'spend' | 'income' | 'budgetMonth' | 'budgetMonths' | 'setBudgeted' | 'accounts'>;
+  | 'replaceRule' | 'deleteRule' | 'payees' | 'spend' | 'income' | 'budgetMonth' | 'budgetMonths' | 'setBudgeted' | 'accounts'
+  | 'monthTotals' | 'accountBalances' | 'firstTransactionMonth'>;
 
 export type ApiStatus = { lastSyncAt?: string; lastRunAt?: string; lastRunOk?: boolean };
 

@@ -45,6 +45,9 @@ class FakeStore implements ApiStore {
   }
   payeeList: { id: string; name: string }[] = [];
   async payees() { return this.payeeList; }
+  async monthTotals() { return { carryOverIn: 0, income: 0, lastMonthOverspent: 0, budgeted: 0, spent: 0, toBudget: 0 }; }
+  async accountBalances() { return []; }
+  async firstTransactionMonth() { return null; }
   async rules() { return this.ruleList; }
   async replaceRule(r: NewCuratorRule) {
     const conds = [{ field: 'imported_payee', op: 'is', value: r.importedPayee },

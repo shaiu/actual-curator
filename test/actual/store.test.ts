@@ -1,6 +1,6 @@
 import * as api from '@actual-app/api';
 import { afterAll, beforeAll, expect, test } from 'vitest';
-import { currentMonth } from '../../src/budget/dates.ts';
+import { addMonths, currentMonth } from '../../src/budget/dates.ts';
 import { ActualStore } from '../../src/actual/store.ts';
 import { buildBudget, daysAgo, type Fixture } from '../helpers/budget.ts';
 
@@ -192,4 +192,44 @@ test('setBudgeted: unknown category id throws a clear error and writes nothing',
   const before = (await store.budgetMonth(m)).categories.find(c => c.id === fx.ids.coffee)!.budgeted;
   await expect(store.setBudgeted(m, { [fx.ids.coffee]: 11111, nope: 5 })).rejects.toThrow(/unknown categor.*nope/);
   expect((await store.budgetMonth(m)).categories.find(c => c.id === fx.ids.coffee)!.budgeted).toBe(before);
+});
+
+const heldOf = (t: Awaited<ReturnType<ActualStore['monthTotals']>>) =>
+  t.carryOverIn + t.income + t.lastMonthOverspent - t.budgeted - t.toBudget;
+
+test('monthTotals signs and identity', async () => {
+  const m = thisMonth();
+  const before = (await store.monthTotals(m)).budgeted;
+  const was = (await store.budgetMonth(m)).categories.find(c => c.id === fx.ids.coffee)!.budgeted;
+  await store.setBudgeted(m, { [fx.ids.coffee]: 50000 });
+  const t = await store.monthTotals(m);
+  expect(t.budgeted).toBe(before - was + 50000);
+  expect(t.budgeted).toBeGreaterThan(0);
+  expect(t.spent).toBeGreaterThan(0);
+  expect(heldOf(t)).toBe(0);
+  await api.holdBudgetForNextMonth(m, 10000);
+  const held = await store.monthTotals(m);
+  expect(heldOf(held)).toBe(10000);
+  expect((await store.monthTotals(addMonths(m, 1))).carryOverIn).toBe(held.toBudget + 10000);
+  await api.resetBudgetHold(m);
+});
+
+test('accountBalances: off-budget accounts carry their balance', async () => {
+  const all = await store.accountBalances();
+  expect(all.find(a => a.id === fx.ids.invest)).toEqual({ id: fx.ids.invest, name: 'Invest', offbudget: true, closed: false, balance: -5000 });
+});
+
+test('firstTransactionMonth is the earliest on-budget row\'s month', async () => {
+  expect(await store.firstTransactionMonth()).toBe(daysAgo(90).slice(0, 7));
+});
+
+test('monthTotals identity holds with last month overspent (a negative lastMonthOverspent)', async () => {
+  const m = thisMonth();
+  const before = await store.monthTotals(m);
+  await api.importTransactions(fx.ids.bank, [
+    { date: `${addMonths(m, -1)}-15`, amount: -987600, payee_name: 'ארומה', notes: 'overspend', imported_id: 'over-1', category: fx.ids.groceries },
+  ] as never);
+  const t = await store.monthTotals(m);
+  expect(t.lastMonthOverspent).toBeLessThan(before.lastMonthOverspent);
+  expect(heldOf(t)).toBe(0);
 });
