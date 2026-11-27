@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 — month summary, history, accounts and runway routes
+
+- Four read-only routes: `GET /v1/budget/summary`, `GET /v1/budget/history`, `GET /v1/accounts` (balances and recent
+  transfers) and `GET /v1/budget/runway` (how long the saved plan lasts against its regular income, with notes on what
+  the estimate leaves out). Every figure is computed by the curator.
+- Excluded categories are not listed by name, id or rows in these routes; their money is only part of the combined
+  figure for everything outside the plan's lines.
+- `stale_plan` no longer names an excluded category that is missing or hidden in Actual; it only counts it.
+
 ## 0.5.0 — always-review payees
 
 - API-managed always-review list on top of the config `reviewPayees`: `GET/POST/DELETE /v1/review-payees`,
