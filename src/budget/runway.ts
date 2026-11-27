@@ -1,6 +1,7 @@
 // How long the money already in the budget covers the gap between the plan and regular income. An estimate, in minor
 // units, and it says what it leaves out. Spec: ausie docs/superpowers/specs/2026-11-27-finance-income-gap-tools-design.md §4.
 import type { CuratorRow } from '../actual/types.ts';
+import { formatAmount } from '../http/format.ts';
 import { addMonths } from './dates.ts';
 import { incomeStatus, matchIncome } from './events.ts';
 import { lineIds, summarize, uncategorized } from './ledger.ts';
@@ -79,14 +80,18 @@ export function runway({ plan, snap, totals, past, currentRows, offbudget }: Run
   const notes: RunwayNote[] = [{ effect: 'less', text: "Spending outside the plan's lines is not in the monthly gap." }];
   const loose = [...past.map(p => p.rows), currentRows].reduce((s, rows) => s + uncategorized(rows, offbudget).out, 0);
   if (loose > 0) notes.push({ effect: 'less', text: 'Uncategorized spending is not deducted.', amount: loose });
-  // The average is by calendar month, so a payday that slides over a month edge adds or drops a whole deposit.
+  // The average is what the months paid, which can be far from what the plan expects: an irregular source, a payday that
+  // slid over a month edge, a one-off extra. The direction follows the money, never the number of deposits.
   const landed = past.flatMap(p => incomeStatus(plan, p.month, p.rows.filter(r => !offbudget.has(r.account))).landed);
-  for (const s of countedSources(plan)) {
-    const n = landed.filter(l => l.source === s).length;
-    if (n === past.length) continue;
-    notes.push({ effect: n > past.length ? 'less' : 'longer',
-      text: `Income "${s.name}": ${n} deposit(s) in the three averaged months, not 3. A payday that crossed a month edge changes the average.` });
-  }
+  countedSources(plan).forEach((s, i) => {
+    const average = Math.round(incomeMonths.reduce((sum, x) => sum + x.regular[i]!.amount, 0) / incomeMonths.length);
+    const expected = Math.round(s.expectedAmount * 100);
+    if (Math.abs(average - expected) * 10 <= expected) return;
+    const effect = average > expected ? 'less' as const : 'longer' as const;
+    const deposits = landed.filter(l => l.source === s).length;
+    notes.push({ effect, text: `Income "${s.name}": the three averaged months give ${formatAmount(average)} a month (${deposits} deposit(s)); `
+      + `the plan expects ${formatAmount(expected)}. At the plan's amount the money would last ${effect}.` });
+  });
   // In none of Actual's totals, so not in the carry-over, even when it matches a source and so counts as landed.
   const waiting = uncategorized(currentRows, offbudget).in;
   if (waiting > 0) {

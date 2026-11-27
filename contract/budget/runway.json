@@ -150,6 +150,10 @@
       },
       {
         "effect": "longer",
+        "text": "Income \"Salary\": the three averaged months give 4000.00 a month (3 deposit(s)); the plan expects 15000.00. At the plan's amount the money would last longer."
+      },
+      {
+        "effect": "longer",
         "text": "Expected income \"Salary\" has not landed this month and is not counted."
       },
       {
