@@ -1,6 +1,15 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { z } from 'zod';
 import { planSchema, type Plan } from './types.ts';
+
+const entryBase = { at: z.string(), month: z.string(), approvedBy: z.string(), outcome: z.literal('unconfirmed').optional() };
+const journalEntry = z.discriminatedUnion('op', [
+  z.object({ ...entryBase, op: z.literal('apply'), added: z.record(z.string(), z.number().int()) }),
+  z.object({ ...entryBase, op: z.literal('move'), from: z.string(), to: z.string(), amount: z.number().int() }),
+]);
+/** One apply or move from `writes.jsonl`. Amounts in minor units. */
+export type JournalEntry = z.output<typeof journalEntry>;
 
 export type BudgetState = { acked: Record<string, string /* iso */> };
 
@@ -54,6 +63,20 @@ export class BudgetFiles {
 
   journal(entry: object, at: Date): void {
     this.append('writes.jsonl', { at: at.toISOString(), ...entry });
+  }
+
+  /** Every readable journal entry, oldest first. A corrupt or half-written line is skipped. */
+  writes(): JournalEntry[] {
+    const file = join(this.dir, 'writes.jsonl');
+    if (!existsSync(file)) return [];
+    return readFileSync(file, 'utf8').split('\n').flatMap(line => {
+      try {
+        const parsed = journalEntry.safeParse(JSON.parse(line));
+        return parsed.success ? [parsed.data] : [];
+      } catch {
+        return [];
+      }
+    });
   }
 
   state(): BudgetState {

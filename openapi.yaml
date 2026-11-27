@@ -432,6 +432,55 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /v1/accounts:
+    get:
+      summary: |
+        Balances and the last 30 days of transfers. Syncs first. No income or spending figure: a transfer from an on-budget to
+        an off-budget account can have a category, and Actual's month totals then count it. Needs no budget plan.
+      responses:
+        "200": { description: "OK: {accounts:[{name,onBudget,closed,balance (Money)}] (open ones, and closed ones holding money), totals:{onBudget,offBudget (Money)}, transfersSince, transfers:[{date,from,to,amount (Money, positive)}] newest first, each transfer once}" }
+        "400": { $ref: "#/components/responses/Error", description: "400 too_many_rows" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/budget/summary:
+    get:
+      summary: |
+        One month's totals. Syncs first. "lines" are the plan's categories that are not excluded; "outside" is everything else
+        as ONE combined figure with no names. to budget = carry-over in + income + last month's overspending (zero or less)
+        - budgeted - held for next month. heldForNextMonth is derived from that identity; carryOverOut = toBudget + held.
+        budgeted and spent are positive in the normal case. uncategorized rows are in none of Actual's totals.
+      parameters: [{ name: month, in: query, required: true, schema: { type: string, example: "2026-11" } }]
+      responses:
+        "200": { description: "OK: {month, partial, carryOverIn, income, lastMonthOverspent, budgeted:{lines,outside,total}, spent:{lines,outside,total}, toBudget, heldForNextMonth, carryOverOut, uncategorized:{in,out}}; amounts are Money" }
+        "400": { $ref: "#/components/responses/Error", description: "400 bad_request / too_many_rows" }
+        "404": { $ref: "#/components/responses/Error", description: "404 no_data: before the first transaction month, or after the current month" }
+        "409": { $ref: "#/components/responses/Error", description: "409 no_plan / stale_plan" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/budget/history:
+    get:
+      summary: |
+        The six months ending at "month": each plan line's budgeted amount and its change from the month before, plus the
+        curator's own applies and moves. Syncs first. With categoryId, that line only (no outside, total or uncategorized).
+      parameters:
+        - { name: month, in: query, required: true, schema: { type: string, example: "2026-11" } }
+        - { name: categoryId, in: query, schema: { type: string } }
+      responses:
+        "200": { description: "OK: {months:[{month, partial, firstMonth, lines:[{categoryId,label,budgeted,change (Money or null)}], outside, total, uncategorized, changes:[{at,op,by,unconfirmed,lines:[{label,change}],counterpart}]}], missingMonths, note}; amounts are Money" }
+        "400": { $ref: "#/components/responses/Error", description: "400 bad_request / bad_category (not a line of this budget) / too_many_rows" }
+        "409": { $ref: "#/components/responses/Error", description: "409 no_plan / stale_plan" }
+        "503": { $ref: "#/components/responses/Error" }
+  /v1/budget/runway:
+    get:
+      summary: |
+        An ESTIMATE of how many months the money in the budget covers the gap between the plan's lines and regular income
+        (deposits matching a plan income source that is not a fixed transfer, averaged over the three complete months before
+        this one). Always the current month. Syncs first. status: short_now (nothing available), no_gap (no month count) or
+        limited; months is rounded down to one decimal and counts from next month. notes say what the estimate leaves out,
+        each "less" (may last less), "longer" (may last longer) or "always".
+      responses:
+        "200": { description: "OK: {month, status, monthlyPlan, plannedLines:[{categoryId,label,monthly}], oneOffs:[{label,due}], averageIncome, incomeMonths:[{month,regular:[{source,amount}],regularTotal,other}], gap, available, carryOver:{carryOverOut,negativeBalances,stillNeeded}, shortfall (Money or null), months, wholeMonths, lastCoveredMonth, notes:[{effect,text,amount?}]}; amounts are Money" }
+        "400": { $ref: "#/components/responses/Error", description: "400 too_many_rows" }
+        "409": { $ref: "#/components/responses/Error", description: "409 no_plan / stale_plan / not_enough_history / no_income_sources" }
+        "503": { $ref: "#/components/responses/Error" }
   /v1/budget/status:
     get:
       summary: |

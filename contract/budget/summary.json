@@ -1,0 +1,70 @@
+{
+  "route": "GET /v1/budget/summary",
+  "status": 200,
+  "body": {
+    "month": "2026-11",
+    "partial": true,
+    "carryOverIn": {
+      "amount": 1180000,
+      "formatted": "11800.00"
+    },
+    "income": {
+      "amount": 0,
+      "formatted": "0.00"
+    },
+    "lastMonthOverspent": {
+      "amount": -5000,
+      "formatted": "-50.00"
+    },
+    "budgeted": {
+      "lines": {
+        "amount": 180000,
+        "formatted": "1800.00"
+      },
+      "outside": {
+        "amount": -4000,
+        "formatted": "-40.00"
+      },
+      "total": {
+        "amount": 176000,
+        "formatted": "1760.00"
+      }
+    },
+    "spent": {
+      "lines": {
+        "amount": 20000,
+        "formatted": "200.00"
+      },
+      "outside": {
+        "amount": 0,
+        "formatted": "0.00"
+      },
+      "total": {
+        "amount": 20000,
+        "formatted": "200.00"
+      }
+    },
+    "toBudget": {
+      "amount": 989000,
+      "formatted": "9890.00"
+    },
+    "heldForNextMonth": {
+      "amount": 10000,
+      "formatted": "100.00"
+    },
+    "carryOverOut": {
+      "amount": 999000,
+      "formatted": "9990.00"
+    },
+    "uncategorized": {
+      "in": {
+        "amount": 0,
+        "formatted": "0.00"
+      },
+      "out": {
+        "amount": 4200,
+        "formatted": "42.00"
+      }
+    }
+  }
+}

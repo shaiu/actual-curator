@@ -1,0 +1,48 @@
+{
+  "route": "GET /v1/accounts",
+  "status": 200,
+  "body": {
+    "accounts": [
+      {
+        "name": "Bank",
+        "onBudget": true,
+        "closed": false,
+        "balance": {
+          "amount": 1180000,
+          "formatted": "11800.00"
+        }
+      },
+      {
+        "name": "Savings",
+        "onBudget": false,
+        "closed": false,
+        "balance": {
+          "amount": 25000000,
+          "formatted": "250000.00"
+        }
+      }
+    ],
+    "totals": {
+      "onBudget": {
+        "amount": 1180000,
+        "formatted": "11800.00"
+      },
+      "offBudget": {
+        "amount": 25000000,
+        "formatted": "250000.00"
+      }
+    },
+    "transfersSince": "2026-10-16",
+    "transfers": [
+      {
+        "date": "2026-11-05",
+        "from": "Bank",
+        "to": "Savings",
+        "amount": {
+          "amount": 300000,
+          "formatted": "3000.00"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,403 @@
+{
+  "route": "GET /v1/budget/history",
+  "status": 200,
+  "body": {
+    "months": [
+      {
+        "month": "2026-07",
+        "partial": false,
+        "firstMonth": true,
+        "lines": [
+          {
+            "categoryId": "rent",
+            "label": "Needs / Rent",
+            "budgeted": {
+              "amount": 0,
+              "formatted": "0.00"
+            },
+            "change": null
+          },
+          {
+            "categoryId": "groc",
+            "label": "Needs / Groceries",
+            "budgeted": {
+              "amount": 90000,
+              "formatted": "900.00"
+            },
+            "change": null
+          },
+          {
+            "categoryId": "fun",
+            "label": "Wants / Fun",
+            "budgeted": {
+              "amount": 50000,
+              "formatted": "500.00"
+            },
+            "change": null
+          },
+          {
+            "categoryId": "prot",
+            "label": "Needs / Insurance",
+            "budgeted": {
+              "amount": 30000,
+              "formatted": "300.00"
+            },
+            "change": null
+          }
+        ],
+        "outside": {
+          "amount": -4000,
+          "formatted": "-40.00"
+        },
+        "total": {
+          "amount": 166000,
+          "formatted": "1660.00"
+        },
+        "uncategorized": {
+          "in": {
+            "amount": 0,
+            "formatted": "0.00"
+          },
+          "out": {
+            "amount": 0,
+            "formatted": "0.00"
+          }
+        },
+        "changes": []
+      },
+      {
+        "month": "2026-08",
+        "partial": false,
+        "firstMonth": false,
+        "lines": [
+          {
+            "categoryId": "rent",
+            "label": "Needs / Rent",
+            "budgeted": {
+              "amount": 0,
+              "formatted": "0.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          },
+          {
+            "categoryId": "groc",
+            "label": "Needs / Groceries",
+            "budgeted": {
+              "amount": 90000,
+              "formatted": "900.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          },
+          {
+            "categoryId": "fun",
+            "label": "Wants / Fun",
+            "budgeted": {
+              "amount": 50000,
+              "formatted": "500.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          },
+          {
+            "categoryId": "prot",
+            "label": "Needs / Insurance",
+            "budgeted": {
+              "amount": 30000,
+              "formatted": "300.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          }
+        ],
+        "outside": {
+          "amount": -4000,
+          "formatted": "-40.00"
+        },
+        "total": {
+          "amount": 166000,
+          "formatted": "1660.00"
+        },
+        "uncategorized": {
+          "in": {
+            "amount": 0,
+            "formatted": "0.00"
+          },
+          "out": {
+            "amount": 0,
+            "formatted": "0.00"
+          }
+        },
+        "changes": []
+      },
+      {
+        "month": "2026-09",
+        "partial": false,
+        "firstMonth": false,
+        "lines": [
+          {
+            "categoryId": "rent",
+            "label": "Needs / Rent",
+            "budgeted": {
+              "amount": 0,
+              "formatted": "0.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          },
+          {
+            "categoryId": "groc",
+            "label": "Needs / Groceries",
+            "budgeted": {
+              "amount": 90000,
+              "formatted": "900.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          },
+          {
+            "categoryId": "fun",
+            "label": "Wants / Fun",
+            "budgeted": {
+              "amount": 50000,
+              "formatted": "500.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          },
+          {
+            "categoryId": "prot",
+            "label": "Needs / Insurance",
+            "budgeted": {
+              "amount": 30000,
+              "formatted": "300.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          }
+        ],
+        "outside": {
+          "amount": -4000,
+          "formatted": "-40.00"
+        },
+        "total": {
+          "amount": 166000,
+          "formatted": "1660.00"
+        },
+        "uncategorized": {
+          "in": {
+            "amount": 0,
+            "formatted": "0.00"
+          },
+          "out": {
+            "amount": 0,
+            "formatted": "0.00"
+          }
+        },
+        "changes": []
+      },
+      {
+        "month": "2026-10",
+        "partial": false,
+        "firstMonth": false,
+        "lines": [
+          {
+            "categoryId": "rent",
+            "label": "Needs / Rent",
+            "budgeted": {
+              "amount": 0,
+              "formatted": "0.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          },
+          {
+            "categoryId": "groc",
+            "label": "Needs / Groceries",
+            "budgeted": {
+              "amount": 90000,
+              "formatted": "900.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          },
+          {
+            "categoryId": "fun",
+            "label": "Wants / Fun",
+            "budgeted": {
+              "amount": 50000,
+              "formatted": "500.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          },
+          {
+            "categoryId": "prot",
+            "label": "Needs / Insurance",
+            "budgeted": {
+              "amount": 30000,
+              "formatted": "300.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          }
+        ],
+        "outside": {
+          "amount": -4000,
+          "formatted": "-40.00"
+        },
+        "total": {
+          "amount": 166000,
+          "formatted": "1660.00"
+        },
+        "uncategorized": {
+          "in": {
+            "amount": 0,
+            "formatted": "0.00"
+          },
+          "out": {
+            "amount": 0,
+            "formatted": "0.00"
+          }
+        },
+        "changes": []
+      },
+      {
+        "month": "2026-11",
+        "partial": true,
+        "firstMonth": false,
+        "lines": [
+          {
+            "categoryId": "rent",
+            "label": "Needs / Rent",
+            "budgeted": {
+              "amount": 0,
+              "formatted": "0.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          },
+          {
+            "categoryId": "groc",
+            "label": "Needs / Groceries",
+            "budgeted": {
+              "amount": 100000,
+              "formatted": "1000.00"
+            },
+            "change": {
+              "amount": 10000,
+              "formatted": "100.00"
+            }
+          },
+          {
+            "categoryId": "fun",
+            "label": "Wants / Fun",
+            "budgeted": {
+              "amount": 50000,
+              "formatted": "500.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          },
+          {
+            "categoryId": "prot",
+            "label": "Needs / Insurance",
+            "budgeted": {
+              "amount": 30000,
+              "formatted": "300.00"
+            },
+            "change": {
+              "amount": 0,
+              "formatted": "0.00"
+            }
+          }
+        ],
+        "outside": {
+          "amount": 0,
+          "formatted": "0.00"
+        },
+        "total": {
+          "amount": 180000,
+          "formatted": "1800.00"
+        },
+        "uncategorized": {
+          "in": {
+            "amount": 0,
+            "formatted": "0.00"
+          },
+          "out": {
+            "amount": 4200,
+            "formatted": "42.00"
+          }
+        },
+        "changes": [
+          {
+            "at": "2026-11-04T08:00:00.000Z",
+            "op": "move",
+            "by": "shai",
+            "unconfirmed": false,
+            "lines": [
+              {
+                "label": "Needs / Groceries",
+                "change": {
+                  "amount": -2000,
+                  "formatted": "-20.00"
+                }
+              }
+            ],
+            "counterpart": "outside the plan's lines"
+          },
+          {
+            "at": "2026-11-02T08:00:00.000Z",
+            "op": "apply",
+            "by": "shai",
+            "unconfirmed": true,
+            "lines": [
+              {
+                "label": "Needs / Groceries",
+                "change": {
+                  "amount": 12000,
+                  "formatted": "120.00"
+                }
+              }
+            ],
+            "counterpart": null
+          }
+        ]
+      }
+    ],
+    "missingMonths": [
+      "2026-06"
+    ],
+    "note": "Only applies and moves made through the curator have a change record; edits made in Actual's own screen do not."
+  }
+}

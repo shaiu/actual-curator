@@ -1,10 +1,11 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { beforeEach, expect, test } from 'vitest';
 import type { BudgetFiles } from '../../src/budget/plan-store.ts';
 import type { PlanInput } from '../../src/budget/types.ts';
 import type { createApp } from '../../src/http/app.ts';
+import { formatAmount } from '../../src/http/format.ts';
 import { type FakeStore, PLAN_SAVED, makeBudgetApp, plan, row, snapshot } from '../helpers/budget-http.ts';
 
 let store: FakeStore;
@@ -493,4 +494,161 @@ test('plan: an income source account that is a name, not an on-budget id, is ref
   expect((await put('/plan', { plan: { ...bad, incomeSources: [{ ...bad.incomeSources[0], account: 'off' }] }, by: 't', why: 't' })).status).toBe(409);
   savePlanOf(bad);
   expect(await errCode(await get('/propose'))).toBe('stale_plan');
+});
+
+const m = (amount: number) => ({ amount, formatted: formatAmount(amount) });
+const SECRETS = ['biz', 'Biz / Inbal', 'misc', 'Wants / Misc'];
+const bodyOf = async (path: string, status = 200) => {
+  const r = await get(path);
+  expect(r.status).toBe(status);
+  return await r.json() as any;
+};
+/** Gives the excluded and the unplanned category real figures in a month. */
+const outsideSpend = (month: string, bizBudgeted: number) => {
+  const s = snapshot(month);
+  Object.assign(s.categories.find(c => c.id === 'biz')!, { budgeted: bizBudgeted, spent: -7000 });
+  Object.assign(s.categories.find(c => c.id === 'misc')!, { budgeted: 1234, spent: -3000 });
+  store.snaps.set(month, s);
+};
+
+test('summary identity: held and carry-over out are derived from Actual\'s totals', async () => {
+  savePlan();
+  store.totals.set('2026-11', { carryOverIn: 100000, income: 400000, lastMonthOverspent: -5000, budgeted: 180000, spent: 20000, toBudget: 305000 });
+  const b = await bodyOf('/summary?month=2026-11');
+  expect(b).toMatchObject({ month: '2026-11', partial: true, carryOverIn: m(100000), income: m(400000), lastMonthOverspent: m(-5000),
+    toBudget: m(305000), carryOverOut: m(315000), heldForNextMonth: m(10000), uncategorized: { in: m(0), out: m(0) } });
+  expect(b.budgeted).toEqual({ lines: m(180000), outside: m(0), total: m(180000) });
+  expect(b.spent).toEqual({ lines: m(20000), outside: m(0), total: m(20000) });
+  expect(store.syncs).toBeGreaterThan(0);
+});
+
+test('summary: lines plus outside equals the total, a negative outside figure included', async () => {
+  savePlan();
+  outsideSpend('2026-10', -4482635 - 0);
+  store.snaps.get('2026-10')!.categories.find(c => c.id === 'misc')!.budgeted = 0;
+  store.totals.set('2026-10', { carryOverIn: 0, income: 0, lastMonthOverspent: 0, budgeted: -4302635, spent: 20000, toBudget: 4302635 });
+  const b = await bodyOf('/summary?month=2026-10');
+  expect(b.partial).toBe(false);
+  expect(b.budgeted).toEqual({ lines: m(180000), outside: m(-4482635), total: m(-4302635) });
+});
+
+test('no excluded leak: summary, history and one line\'s history name nothing outside the lines', async () => {
+  savePlan();
+  for (const month of ['2026-10', '2026-11']) outsideSpend(month, 999900);
+  const entry = { month: '2026-11', approvedBy: 'shai' };
+  files.journal({ ...entry, op: 'move', from: 'groc', to: 'misc', amount: 100 }, new Date('2026-11-03T00:00:00Z'));
+  files.journal({ ...entry, op: 'apply', added: { biz: 5000, groc: 700 } }, new Date('2026-11-04T00:00:00Z'));
+  for (const path of ['/summary?month=2026-11', '/history?month=2026-11', '/history?month=2026-11&categoryId=groc']) {
+    const b = await bodyOf(path);
+    for (const s of SECRETS) expect(JSON.stringify(b)).not.toContain(s);
+    if (b.months) {
+      const changes = b.months.find((x: any) => x.month === '2026-11').changes;
+      expect(changes.map((e: any) => e.counterpart)).toEqual(["outside the plan's lines", "outside the plan's lines"]);
+      expect(changes.map((e: any) => e.lines)).toEqual([[{ label: 'Needs / Groceries', change: m(-100) }], [{ label: 'Needs / Groceries', change: m(700) }]]);
+    }
+  }
+});
+
+test('history: six months ending at the asked one, negative amounts, change and missingMonths', async () => {
+  savePlan();
+  store.firstMonth = '2026-09';
+  const sep = snapshot('2026-09');
+  sep.categories.find(c => c.id === 'groc')!.budgeted = -5000;
+  store.snaps.set('2026-09', sep);
+  store.totals.set('2026-09', { carryOverIn: 0, income: 0, lastMonthOverspent: 0, budgeted: 75000, spent: 0, toBudget: 0 });
+  const b = await bodyOf('/history?month=2026-11');
+  expect(b.months.map((x: any) => x.month)).toEqual(['2026-09', '2026-10', '2026-11']);
+  expect(b.missingMonths).toEqual(['2026-06', '2026-07', '2026-08']);
+  expect(b.months.map((x: any) => [x.partial, x.firstMonth])).toEqual([[false, true], [false, false], [true, false]]);
+  const groc = (i: number) => b.months[i].lines.find((l: any) => l.categoryId === 'groc');
+  expect(groc(0)).toEqual({ categoryId: 'groc', label: 'Needs / Groceries', budgeted: m(-5000), change: null });
+  expect(groc(1)).toEqual({ categoryId: 'groc', label: 'Needs / Groceries', budgeted: m(100000), change: m(105000) });
+  expect(b.months[0].total).toEqual(m(75000));
+  expect(b.months[0].outside).toEqual(m(0));
+  expect(b.months[0].uncategorized).toEqual({ in: m(0), out: m(0) });
+  expect(b.note).toBe('Only applies and moves made through the curator have a change record; edits made in Actual\'s own screen do not.');
+});
+
+test('history: the window\'s first month is compared with the month before the window', async () => {
+  savePlan();
+  const may = snapshot('2026-05');
+  may.categories.find(c => c.id === 'groc')!.budgeted = 90000;
+  store.snaps.set('2026-05', may);
+  const b = await bodyOf('/history?month=2026-11');
+  expect(b.months[0].month).toBe('2026-06');
+  expect(b.months[0].lines.find((l: any) => l.categoryId === 'groc').change).toEqual(m(10000));
+});
+
+test('history with categoryId has that line only, with no outside, total or uncategorized', async () => {
+  savePlan();
+  const b = await bodyOf('/history?month=2026-11&categoryId=groc');
+  for (const month of b.months) {
+    expect(month.lines.map((l: any) => l.categoryId)).toEqual(['groc']);
+    expect(Object.keys(month)).toEqual(['month', 'partial', 'firstMonth', 'lines', 'changes']);
+  }
+});
+
+test('history: excluded, unplanned and unknown ids get one identical refusal', async () => {
+  savePlan();
+  const bodies = [];
+  for (const id of ['biz', 'misc', 'nope', '']) bodies.push(await bodyOf(`/history?month=2026-11&categoryId=${id}`, 400));
+  expect(bodies[0]).toEqual({ error: { code: 'bad_category', message: 'not a line of this budget' } });
+  for (const b of bodies) expect(b).toEqual(bodies[0]);
+});
+
+test('history and summary: a line absent from a past snapshot is 0, not stale_plan', async () => {
+  savePlan();
+  const oct = snapshot('2026-10');
+  oct.categories = oct.categories.filter(c => c.id !== 'groc');
+  oct.categories.find(c => c.id === 'fun')!.hidden = true;
+  store.snaps.set('2026-10', oct);
+  const b = await bodyOf('/history?month=2026-11');
+  const october = b.months.find((x: any) => x.month === '2026-10');
+  for (const [id, label] of [['groc', 'Needs / Groceries'], ['fun', 'Wants / Fun']]) {
+    expect(october.lines.find((l: any) => l.categoryId === id)).toMatchObject({ label, budgeted: m(0) });
+  }
+  expect((await bodyOf('/summary?month=2026-10')).budgeted.lines).toEqual(m(30000));
+});
+
+test('history: a corrupt or foreign journal line is skipped', async () => {
+  savePlan();
+  files.journal({ op: 'apply', month: '2026-11', approvedBy: 'shai', added: { groc: 100 } }, new Date('2026-11-03T00:00:00Z'));
+  appendFileSync(join(dir, 'budget', 'writes.jsonl'), '{"at":"2026-11-04T00:00:00Z","op":"app\nnull\n{"op":"apply","month":"2026-11"}\n');
+  const b = await bodyOf('/history?month=2026-11');
+  expect(b.months.at(-1).changes).toHaveLength(1);
+});
+
+test('summary and history: 5000 rows in a month refuse instead of summing a truncated list', async () => {
+  savePlan();
+  store.rows = Array.from({ length: 5000 }, (_, i) => row({ id: `r${i}`, amount: -1 }));
+  for (const path of ['/summary?month=2026-11', '/history?month=2026-11']) {
+    expect((await bodyOf(path, 400)).error.code).toBe('too_many_rows');
+  }
+});
+
+test('summary and history report the month\'s uncategorized money beside the totals', async () => {
+  savePlan();
+  store.rows = [row({ id: 'out', amount: -700 }), row({ id: 'in', amount: 300 }),
+    row({ id: 'tr', amount: -9, transferId: 'x' }), row({ id: 'off', amount: -9, account: 'off' })];
+  const want = { in: m(300), out: m(700) };
+  expect((await bodyOf('/summary?month=2026-11')).uncategorized).toEqual(want);
+  expect((await bodyOf('/history?month=2026-11')).months.at(-1).uncategorized).toEqual(want);
+});
+
+test('summary: no_data after the current month and before the first transaction month', async () => {
+  savePlan();
+  store.firstMonth = '2026-09';
+  for (const month of ['2026-12', '2026-08']) {
+    expect((await bodyOf(`/summary?month=${month}`, 404)).error.code).toBe('no_data');
+  }
+});
+
+test('summary and history: no plan, no month and a failed sync are errors', async () => {
+  for (const path of ['/summary?month=2026-11', '/history?month=2026-11']) {
+    expect((await bodyOf(path, 409)).error.code).toBe('no_plan');
+  }
+  savePlan();
+  for (const path of ['/summary', '/history']) expect((await get(path)).status).toBe(400);
+  store.failSync = true;
+  expect((await bodyOf('/history?month=2026-11', 503)).error.code).toBe('sync_failed');
 });

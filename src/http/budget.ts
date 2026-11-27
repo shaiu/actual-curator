@@ -1,10 +1,13 @@
 import type { Context, Hono } from 'hono';
 import { z } from 'zod';
 import { BudgetWriteUnconfirmedError } from '../actual/store.ts';
+import type { CuratorRow } from '../actual/types.ts';
 import { addMonths, currentMonth, daysInMonth, jerusalemToday, previousMonth } from '../budget/dates.ts';
 import { buildEvents, type BudgetEvent, type IncomeRow, incomeStatus } from '../budget/events.ts';
+import { dataMonth, lineChanges, lineIds, lineMonth, summarize, uncategorized } from '../budget/ledger.ts';
 import { type Move, offPlan, type OffPlanLine, pace, type PaceLine, suggestMoves } from '../budget/pace.ts';
 import { availableFor, checkAccounts, checkPlan, fundingShortfall, PlanError, propose, proposalId } from '../budget/propose.ts';
+import { countedSources, runway } from '../budget/runway.ts';
 import { type MonthSnapshot, type Plan, planSchema } from '../budget/types.ts';
 import { ApiError } from './errors.ts';
 import { money } from './format.ts';
@@ -29,6 +32,9 @@ const moveBody = z.object({
 });
 const ackBody = z.object({ ids: z.array(z.string().min(1)) });
 
+const HISTORY_MONTHS = 6;
+const HISTORY_NOTE = "Only applies and moves made through the curator have a change record; edits made in Actual's own screen do not.";
+
 const planAmounts = (plan: Plan): number[] => [
   ...plan.categories.flatMap(c => [c.amount, c.target]),
   ...plan.incomeSources.map(s => s.expectedAmount),
@@ -41,9 +47,23 @@ const moneyOff = (l: OffPlanLine) => ({ ...l, spent: money(l.spent), balance: mo
 const moneyEvent = (e: BudgetEvent) =>
   e.kind === 'income' ? { ...e, amount: money(e.amount) } : e.kind === 'unplanned' ? { ...e, balance: money(e.balance) } : e;
 
-const day30Before = (today: string): string => dayBefore(today, 30);
+export const day30Before = (today: string): string => dayBefore(today, 30);
 const addDay = (date: string): string => dayBefore(date, -1);
 const dayBefore = (date: string, days: number): string => new Date(Date.parse(`${date}T00:00:00Z`) - days * 864e5).toISOString().slice(0, 10);
+/** Read the latest from the Actual server before reading local state; never decide on stale data. */
+export const freshSync = async (store: ApiDeps['store']): Promise<void> => {
+  try { await store.sync(); } catch (e) {
+    throw new ApiError(503, 'sync_failed', `could not sync with the Actual server: ${(e as Error).message}`);
+  }
+};
+/** A list that is summed or shown whole must not be a full page: it may be cut short. */
+export const ROW_LIMIT = 5000;
+export const wholeList = <T>(rows: T[], what: string): T[] => {
+  if (rows.length >= ROW_LIMIT) {
+    throw new ApiError(400, 'too_many_rows', `${what} has ${ROW_LIMIT} or more transactions; the list would be cut short`);
+  }
+  return rows;
+};
 /** How far ahead of a month its later months are scanned for carried-over To budget. */
 const LOOKAHEAD_MONTHS = 12;
 /** Income events look back this many days from today, so a deposit near a month boundary is not lost. */
@@ -104,6 +124,16 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   };
   const monthRange = (month: string): [string, string] => [`${month}-01`, `${month}-${daysInMonth(month)}`];
   const monthRows = (month: string) => incomeRows([monthRange(month)]);
+  /** Every row of a month, or a refusal when the list would be cut short. */
+  const monthRowsAll = async (month: string): Promise<CuratorRow[]> => {
+    const [from, to] = monthRange(month);
+    return wholeList(await store.transactions({ from, to, limit: ROW_LIMIT }), month);
+  };
+  const offBudgetIds = async () => new Set((await store.accounts()).filter(a => a.offbudget).map(a => a.id));
+  const uncategorizedOf = async (month: string, off: Set<string>) => {
+    const u = uncategorized(await monthRowsAll(month), off);
+    return { in: money(u.in), out: money(u.out) };
+  };
   /**
    * toBudget of every later month Actual has data for (up to a year ahead), in month order. A later month's To budget
    * includes this month's leftover, so what is free to give this month is the minimum across all of them.
@@ -114,12 +144,6 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const out: number[] = [];
     for (const m of months) out.push((await store.budgetMonth(m)).toBudget);
     return out;
-  };
-  /** Read the latest from the Actual server before reading local state; never decide on stale data. */
-  const freshSync = async (): Promise<void> => {
-    try { await store.sync(); } catch (e) {
-      throw new ApiError(503, 'sync_failed', `could not sync with the Actual server: ${(e as Error).message}`);
-    }
   };
   /** The write may have landed even though Actual did not confirm it: leave a trace, then surface the error. */
   const guardedWrite = async (month: string, amounts: Record<string, number>, entry: object): Promise<void> => {
@@ -146,7 +170,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   app.get(`${g}/propose`, async c => {
     const month = monthParam(c);
     writable(month);
-    await freshSync();
+    await freshSync(store);
     const { plan, snap } = await load(month);
     const p = propose(plan, snap, await laterToBudgets(month));
     const { landed, expected } = incomeStatus(plan, month, await monthRows(month));
@@ -171,7 +195,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   app.post(`${g}/apply`, c => exclusive(async () => {
     const b = await body(c, applyBody);
     writable(b.month);
-    await freshSync();
+    await freshSync(store);
     const { plan, snap } = await load(b.month);
     const later = await laterToBudgets(b.month);
     const byId = new Map(snap.categories.map(x => [x.id, x]));
@@ -206,7 +230,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   app.post(`${g}/move`, c => exclusive(async () => {
     const b = await body(c, moveBody);
     writable(b.month);
-    await freshSync();
+    await freshSync(store);
     const { plan, snap } = await load(b.month);
     const byId = new Map(snap.categories.map(x => [x.id, x]));
     const planOf = new Map(plan.categories.map(x => [x.categoryId, x]));
@@ -239,6 +263,93 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
       budgeted: money(cat.budgeted + delta), balance: money(cat.balance + delta) });
     return c.json({ month: b.month, from: out(from, -amount), to: out(to, amount) });
   }));
+
+  app.get(`${g}/summary`, async c => {
+    const month = monthSchema.parse(c.req.query('month'));
+    await freshSync(store);
+    const current = currentMonth(now());
+    const { plan } = await load(current);
+    if (!dataMonth(month, await store.firstTransactionMonth(), current)) {
+      throw new ApiError(404, 'no_data', `no budget data for ${month}`);
+    }
+    const s = summarize(plan, await store.budgetMonth(month), await store.monthTotals(month));
+    const split = (x: typeof s.budgeted) => ({ lines: money(x.lines), outside: money(x.outside), total: money(x.total) });
+    return c.json({ month, partial: month === current, carryOverIn: money(s.carryOverIn), income: money(s.income),
+      lastMonthOverspent: money(s.lastMonthOverspent), budgeted: split(s.budgeted), spent: split(s.spent),
+      toBudget: money(s.toBudget), heldForNextMonth: money(s.heldForNextMonth), carryOverOut: money(s.carryOverOut),
+      uncategorized: await uncategorizedOf(month, await offBudgetIds()) });
+  });
+
+  app.get(`${g}/history`, async c => {
+    const month = monthSchema.parse(c.req.query('month'));
+    const only = c.req.query('categoryId');
+    await freshSync(store);
+    const current = currentMonth(now());
+    const { plan, snap: live } = await load(current);
+    const ids = lineIds(plan);
+    // One refusal for excluded, unplanned and unknown ids, so the answer never says which an id is.
+    if (only !== undefined && !ids.has(only)) throw new ApiError(400, 'bad_category', 'not a line of this budget');
+    const labels = new Map(live.categories.filter(x => ids.has(x.id)).map(x => [x.id, x.label]));
+    const shown = only === undefined ? [...ids] : [only];
+    const first = await store.firstTransactionMonth();
+    const off = await offBudgetIds();
+    const journal = budget.writes();
+    const months = [];
+    const missingMonths: string[] = [];
+    for (const m of Array.from({ length: HISTORY_MONTHS }, (_, i) => addMonths(month, i + 1 - HISTORY_MONTHS))) {
+      if (!dataMonth(m, first, current)) {
+        missingMonths.push(m);
+        continue;
+      }
+      const snap = await store.budgetMonth(m);
+      const before = previousMonth(m);
+      const prev = dataMonth(before, first, current) ? await store.budgetMonth(before) : null;
+      const lines = shown.map(id => {
+        const budgeted = lineMonth(snap, id).budgeted;
+        return { categoryId: id, label: labels.get(id)!, budgeted: money(budgeted),
+          change: prev ? money(budgeted - lineMonth(prev, id).budgeted) : null };
+      });
+      const changes = lineChanges(journal, labels, m, only)
+        .map(e => ({ ...e, lines: e.lines.map(l => ({ label: l.label, change: money(l.change) })) }));
+      const head = { month: m, partial: m === current, firstMonth: m === first, lines };
+      if (only !== undefined) {
+        months.push({ ...head, changes });
+        continue;
+      }
+      const { budgeted } = summarize(plan, snap, await store.monthTotals(m));
+      months.push({ ...head, outside: money(budgeted.outside), total: money(budgeted.total),
+        uncategorized: await uncategorizedOf(m, off), changes });
+    }
+    return c.json({ months, missingMonths, note: HISTORY_NOTE });
+  });
+
+  app.get(`${g}/runway`, async c => {
+    await freshSync(store);
+    const month = currentMonth(now());
+    const { plan, snap } = await load(month);
+    if (!countedSources(plan).length) {
+      throw new ApiError(409, 'no_income_sources', 'the plan has no income source that is not a fixed transfer');
+    }
+    const averaged = [-3, -2, -1].map(n => addMonths(month, n));
+    // The month of the first transaction may be partial, so it is never averaged.
+    const first = await store.firstTransactionMonth();
+    if (first === null || first >= averaged[0]!) {
+      throw new ApiError(409, 'not_enough_history', `needs three complete months of data before ${month}`);
+    }
+    const past = [];
+    for (const m of averaged) past.push({ month: m, rows: await monthRowsAll(m) });
+    const r = runway({ plan, snap, totals: await store.monthTotals(month), past, currentRows: await monthRowsAll(month),
+      offbudget: await offBudgetIds() });
+    return c.json({ ...r, monthlyPlan: money(r.monthlyPlan),
+      plannedLines: r.plannedLines.map(l => ({ ...l, monthly: money(l.monthly) })), averageIncome: money(r.averageIncome),
+      incomeMonths: r.incomeMonths.map(x => ({ month: x.month, regular: x.regular.map(s => ({ ...s, amount: money(s.amount) })),
+        regularTotal: money(x.regularTotal), other: money(x.other) })),
+      gap: money(r.gap), available: money(r.available),
+      carryOver: { carryOverOut: money(r.carryOver.carryOverOut), negativeBalances: money(r.carryOver.negativeBalances),
+        stillNeeded: money(r.carryOver.stillNeeded) },
+      shortfall: r.shortfall === null ? null : money(r.shortfall),
+      notes: r.notes.map(({ amount, ...n }) => ({ ...n, ...(amount === undefined ? {} : { amount: money(amount) }) })) });
+  });
 
   app.get(`${g}/status`, async c => {
     const month = monthParam(c);

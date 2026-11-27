@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0
+
+- The budget advisor can now read a month's totals, how the budget changed over past months, account balances and
+  recent transfers, and an estimate of how long the current plan can last. These only read; nothing in your budget
+  changes.
+
 ## 0.5.0
 
 - A payee can be marked "always review" (a store that sells many kinds of things): its rules are removed and its

@@ -11,15 +11,21 @@ export class PlanError extends Error {
   }
 }
 
-/** Throws PlanError('stale_plan') naming every plan categoryId missing from the snapshot or hidden. */
+/**
+ * Throws PlanError('stale_plan') for every plan category missing from the snapshot or hidden. Lines are named;
+ * excluded ones are only counted, because an assistant reads this message out and they are never discussed.
+ */
 export function checkPlan(plan: Plan, snap: MonthSnapshot): void {
   const live = new Map(snap.categories.map((c) => [c.id, c]));
   const stale = plan.categories.filter((c) => {
     const s = live.get(c.categoryId);
     return !s || s.hidden;
-  }).map((c) => c.categoryId);
+  });
   if (stale.length > 0) {
-    throw new PlanError('stale_plan', `plan categories missing or hidden in Actual: ${stale.join(', ')}`);
+    const named = stale.filter((c) => c.kind !== 'excluded').map((c) => c.categoryId);
+    const unnamed = stale.length - named.length;
+    const which = [...named, ...(unnamed ? [`${unnamed} excluded (not named)`] : [])].join(', ');
+    throw new PlanError('stale_plan', `plan categories missing or hidden in Actual: ${which}`);
   }
 }
 
