@@ -31,8 +31,6 @@ const moveBody = z.object({
 });
 const ackBody = z.object({ ids: z.array(z.string().min(1)) });
 
-/** A month's rows are summed, so a full page means the list may be cut short and the sum wrong. */
-const ROW_LIMIT = 5000;
 const HISTORY_MONTHS = 6;
 const HISTORY_NOTE = "Only applies and moves made through the curator have a change record; edits made in Actual's own screen do not.";
 
@@ -48,9 +46,23 @@ const moneyOff = (l: OffPlanLine) => ({ ...l, spent: money(l.spent), balance: mo
 const moneyEvent = (e: BudgetEvent) =>
   e.kind === 'income' ? { ...e, amount: money(e.amount) } : e.kind === 'unplanned' ? { ...e, balance: money(e.balance) } : e;
 
-const day30Before = (today: string): string => dayBefore(today, 30);
+export const day30Before = (today: string): string => dayBefore(today, 30);
 const addDay = (date: string): string => dayBefore(date, -1);
 const dayBefore = (date: string, days: number): string => new Date(Date.parse(`${date}T00:00:00Z`) - days * 864e5).toISOString().slice(0, 10);
+/** Read the latest from the Actual server before reading local state; never decide on stale data. */
+export const freshSync = async (store: ApiDeps['store']): Promise<void> => {
+  try { await store.sync(); } catch (e) {
+    throw new ApiError(503, 'sync_failed', `could not sync with the Actual server: ${(e as Error).message}`);
+  }
+};
+/** A list that is summed or shown whole must not be a full page: it may be cut short. */
+export const ROW_LIMIT = 5000;
+export const wholeList = <T>(rows: T[], what: string): T[] => {
+  if (rows.length >= ROW_LIMIT) {
+    throw new ApiError(400, 'too_many_rows', `${what} has ${ROW_LIMIT} or more transactions; the list would be cut short`);
+  }
+  return rows;
+};
 /** How far ahead of a month its later months are scanned for carried-over To budget. */
 const LOOKAHEAD_MONTHS = 12;
 /** Income events look back this many days from today, so a deposit near a month boundary is not lost. */
@@ -114,11 +126,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   /** Every row of a month, or a refusal when the list would be cut short. */
   const monthRowsAll = async (month: string): Promise<CuratorRow[]> => {
     const [from, to] = monthRange(month);
-    const rows = await store.transactions({ from, to, limit: ROW_LIMIT });
-    if (rows.length >= ROW_LIMIT) {
-      throw new ApiError(400, 'too_many_rows', `${month} has ${ROW_LIMIT} or more transactions; a sum over a cut list would be wrong`);
-    }
-    return rows;
+    return wholeList(await store.transactions({ from, to, limit: ROW_LIMIT }), month);
   };
   const offBudgetIds = async () => new Set((await store.accounts()).filter(a => a.offbudget).map(a => a.id));
   const uncategorizedOf = async (month: string, off: Set<string>) => {
@@ -135,12 +143,6 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const out: number[] = [];
     for (const m of months) out.push((await store.budgetMonth(m)).toBudget);
     return out;
-  };
-  /** Read the latest from the Actual server before reading local state; never decide on stale data. */
-  const freshSync = async (): Promise<void> => {
-    try { await store.sync(); } catch (e) {
-      throw new ApiError(503, 'sync_failed', `could not sync with the Actual server: ${(e as Error).message}`);
-    }
   };
   /** The write may have landed even though Actual did not confirm it: leave a trace, then surface the error. */
   const guardedWrite = async (month: string, amounts: Record<string, number>, entry: object): Promise<void> => {
@@ -167,7 +169,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   app.get(`${g}/propose`, async c => {
     const month = monthParam(c);
     writable(month);
-    await freshSync();
+    await freshSync(store);
     const { plan, snap } = await load(month);
     const p = propose(plan, snap, await laterToBudgets(month));
     const { landed, expected } = incomeStatus(plan, month, await monthRows(month));
@@ -192,7 +194,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   app.post(`${g}/apply`, c => exclusive(async () => {
     const b = await body(c, applyBody);
     writable(b.month);
-    await freshSync();
+    await freshSync(store);
     const { plan, snap } = await load(b.month);
     const later = await laterToBudgets(b.month);
     const byId = new Map(snap.categories.map(x => [x.id, x]));
@@ -227,7 +229,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   app.post(`${g}/move`, c => exclusive(async () => {
     const b = await body(c, moveBody);
     writable(b.month);
-    await freshSync();
+    await freshSync(store);
     const { plan, snap } = await load(b.month);
     const byId = new Map(snap.categories.map(x => [x.id, x]));
     const planOf = new Map(plan.categories.map(x => [x.categoryId, x]));
@@ -263,7 +265,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
 
   app.get(`${g}/summary`, async c => {
     const month = monthSchema.parse(c.req.query('month'));
-    await freshSync();
+    await freshSync(store);
     const current = currentMonth(now());
     const { plan } = await load(current);
     if (!dataMonth(month, await store.firstTransactionMonth(), current)) {
@@ -280,7 +282,7 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   app.get(`${g}/history`, async c => {
     const month = monthSchema.parse(c.req.query('month'));
     const only = c.req.query('categoryId');
-    await freshSync();
+    await freshSync(store);
     const current = currentMonth(now());
     const { plan, snap: live } = await load(current);
     const ids = lineIds(plan);

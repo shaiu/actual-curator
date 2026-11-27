@@ -10,8 +10,10 @@ import type { DecisionLog } from '../log.ts';
 import { hasTag, parseTags, withTags } from '../notes.ts';
 import type { Vocabulary } from '../vocabulary.ts';
 import { PlanError } from '../budget/propose.ts';
+import { listTransfers } from '../budget/accounts.ts';
+import { jerusalemToday } from '../budget/dates.ts';
 import type { BudgetFiles } from '../budget/plan-store.ts';
-import { registerBudgetRoutes } from './budget.ts';
+import { day30Before, freshSync, registerBudgetRoutes, ROW_LIMIT, wholeList } from './budget.ts';
 import { ApiError } from './errors.ts';
 import { bearer } from './auth.ts';
 import { exclusionResolver } from './exclusions.ts';
@@ -116,6 +118,21 @@ export function createApp(deps: ApiDeps): Hono {
         rule: rule ? { payee: rule.importedPayee, ...(rule.notesContains ? { notesContains: rule.notesContains } : {}) } : null });
     }
     return c.json({ rows: out });
+  });
+
+  // No income or spending figure here: a transfer from on to off budget can have a category, which Actual's month totals count.
+  app.get('/accounts', async c => {
+    await freshSync(store);
+    const today = jerusalemToday(now());
+    const since = day30Before(today);
+    const rows = wholeList(await store.transactions({ from: since, to: today, limit: ROW_LIMIT }), 'the last 30 days');
+    const shown = (await store.accountBalances()).filter(a => !a.closed || a.balance !== 0);
+    const total = (offbudget: boolean) => money(shown.filter(a => a.offbudget === offbudget).reduce((s, a) => s + a.balance, 0));
+    return c.json({
+      accounts: shown.map(a => ({ name: a.name, onBudget: !a.offbudget, closed: a.closed, balance: money(a.balance) })),
+      totals: { onBudget: total(false), offBudget: total(true) }, transfersSince: since,
+      transfers: listTransfers(rows).map(t => ({ ...t, amount: money(t.amount) })),
+    });
   });
 
   app.get('/report/spend', async c => {

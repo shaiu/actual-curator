@@ -2,6 +2,7 @@ import * as api from '@actual-app/api';
 import { afterAll, beforeAll, expect, test } from 'vitest';
 import { addMonths, currentMonth } from '../../src/budget/dates.ts';
 import { ActualStore } from '../../src/actual/store.ts';
+import { listTransfers } from '../../src/budget/accounts.ts';
 import { buildBudget, daysAgo, type Fixture } from '../helpers/budget.ts';
 
 let fx: Fixture;
@@ -232,4 +233,11 @@ test('monthTotals identity holds with last month overspent (a negative lastMonth
   const t = await store.monthTotals(m);
   expect(t.lastMonthOverspent).toBeLessThan(before.lastMonthOverspent);
   expect(heldOf(t)).toBe(0);
+});
+
+// The accounts route names a transfer's other side from the row's payee; this is Actual's behaviour, not ours.
+test('a transfer row\'s payee is the other account\'s name, so one transfer lists once', async () => {
+  const rows = await store.transactions({ from: daysAgo(30), to: daysAgo(0), limit: 100 });
+  expect(listTransfers(rows)).toEqual([{ date: daysAgo(6), from: 'Bank', to: 'Card', amount: 10000 }]);
+  for (const r of rows.filter(x => x.transferId)) expect(listTransfers([r])).toEqual(listTransfers(rows));
 });
