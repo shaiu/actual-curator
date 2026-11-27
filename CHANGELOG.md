@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1 — the runway compares each income source with the plan
+
+- `GET /v1/budget/runway`: when a counted source's three-month average is more than 10% from its expected amount, a note
+  gives both figures and the deposit count. Above the plan reads "less", below it "longer". It replaces the note that
+  took its direction from the deposit count, which could point the wrong way for an irregular source. No figure changes.
+
 ## 0.6.0 — month summary, history, accounts and runway routes
 
 - Four read-only routes: `GET /v1/budget/summary`, `GET /v1/budget/history`, `GET /v1/accounts` (balances and recent
