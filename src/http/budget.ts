@@ -1,8 +1,10 @@
 import type { Context, Hono } from 'hono';
 import { z } from 'zod';
 import { BudgetWriteUnconfirmedError } from '../actual/store.ts';
+import type { CuratorRow } from '../actual/types.ts';
 import { addMonths, currentMonth, daysInMonth, jerusalemToday, previousMonth } from '../budget/dates.ts';
 import { buildEvents, type BudgetEvent, type IncomeRow, incomeStatus } from '../budget/events.ts';
+import { dataMonth, lineChanges, lineIds, lineMonth, summarize, uncategorized } from '../budget/ledger.ts';
 import { type Move, offPlan, type OffPlanLine, pace, type PaceLine, suggestMoves } from '../budget/pace.ts';
 import { availableFor, checkAccounts, checkPlan, fundingShortfall, PlanError, propose, proposalId } from '../budget/propose.ts';
 import { type MonthSnapshot, type Plan, planSchema } from '../budget/types.ts';
@@ -28,6 +30,11 @@ const moveBody = z.object({
   amount: shekels.refine(x => x > 0, 'must be > 0'), approvedBy: who,
 });
 const ackBody = z.object({ ids: z.array(z.string().min(1)) });
+
+/** A month's rows are summed, so a full page means the list may be cut short and the sum wrong. */
+const ROW_LIMIT = 5000;
+const HISTORY_MONTHS = 6;
+const HISTORY_NOTE = "Only applies and moves made through the curator have a change record; edits made in Actual's own screen do not.";
 
 const planAmounts = (plan: Plan): number[] => [
   ...plan.categories.flatMap(c => [c.amount, c.target]),
@@ -104,6 +111,20 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
   };
   const monthRange = (month: string): [string, string] => [`${month}-01`, `${month}-${daysInMonth(month)}`];
   const monthRows = (month: string) => incomeRows([monthRange(month)]);
+  /** Every row of a month, or a refusal when the list would be cut short. */
+  const monthRowsAll = async (month: string): Promise<CuratorRow[]> => {
+    const [from, to] = monthRange(month);
+    const rows = await store.transactions({ from, to, limit: ROW_LIMIT });
+    if (rows.length >= ROW_LIMIT) {
+      throw new ApiError(400, 'too_many_rows', `${month} has ${ROW_LIMIT} or more transactions; a sum over a cut list would be wrong`);
+    }
+    return rows;
+  };
+  const offBudgetIds = async () => new Set((await store.accounts()).filter(a => a.offbudget).map(a => a.id));
+  const uncategorizedOf = async (month: string, off: Set<string>) => {
+    const u = uncategorized(await monthRowsAll(month), off);
+    return { in: money(u.in), out: money(u.out) };
+  };
   /**
    * toBudget of every later month Actual has data for (up to a year ahead), in month order. A later month's To budget
    * includes this month's leftover, so what is free to give this month is the minimum across all of them.
@@ -239,6 +260,65 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
       budgeted: money(cat.budgeted + delta), balance: money(cat.balance + delta) });
     return c.json({ month: b.month, from: out(from, -amount), to: out(to, amount) });
   }));
+
+  app.get(`${g}/summary`, async c => {
+    const month = monthSchema.parse(c.req.query('month'));
+    await freshSync();
+    const current = currentMonth(now());
+    const { plan } = await load(current);
+    if (!dataMonth(month, await store.firstTransactionMonth(), current)) {
+      throw new ApiError(404, 'no_data', `no budget data for ${month}`);
+    }
+    const s = summarize(plan, await store.budgetMonth(month), await store.monthTotals(month));
+    const split = (x: typeof s.budgeted) => ({ lines: money(x.lines), outside: money(x.outside), total: money(x.total) });
+    return c.json({ month, partial: month === current, carryOverIn: money(s.carryOverIn), income: money(s.income),
+      lastMonthOverspent: money(s.lastMonthOverspent), budgeted: split(s.budgeted), spent: split(s.spent),
+      toBudget: money(s.toBudget), heldForNextMonth: money(s.heldForNextMonth), carryOverOut: money(s.carryOverOut),
+      uncategorized: await uncategorizedOf(month, await offBudgetIds()) });
+  });
+
+  app.get(`${g}/history`, async c => {
+    const month = monthSchema.parse(c.req.query('month'));
+    const only = c.req.query('categoryId');
+    await freshSync();
+    const current = currentMonth(now());
+    const { plan, snap: live } = await load(current);
+    const ids = lineIds(plan);
+    // One refusal for excluded, unplanned and unknown ids, so the answer never says which an id is.
+    if (only !== undefined && !ids.has(only)) throw new ApiError(400, 'bad_category', 'not a line of this budget');
+    const labels = new Map(live.categories.filter(x => ids.has(x.id)).map(x => [x.id, x.label]));
+    const shown = only === undefined ? [...ids] : [only];
+    const first = await store.firstTransactionMonth();
+    const off = await offBudgetIds();
+    const journal = budget.writes();
+    const months = [];
+    const missingMonths: string[] = [];
+    for (const m of Array.from({ length: HISTORY_MONTHS }, (_, i) => addMonths(month, i + 1 - HISTORY_MONTHS))) {
+      if (!dataMonth(m, first, current)) {
+        missingMonths.push(m);
+        continue;
+      }
+      const snap = await store.budgetMonth(m);
+      const before = previousMonth(m);
+      const prev = dataMonth(before, first, current) ? await store.budgetMonth(before) : null;
+      const lines = shown.map(id => {
+        const budgeted = lineMonth(snap, id).budgeted;
+        return { categoryId: id, label: labels.get(id)!, budgeted: money(budgeted),
+          change: prev ? money(budgeted - lineMonth(prev, id).budgeted) : null };
+      });
+      const changes = lineChanges(journal, labels, m, only)
+        .map(e => ({ ...e, lines: e.lines.map(l => ({ label: l.label, change: money(l.change) })) }));
+      const head = { month: m, partial: m === current, firstMonth: m === first, lines };
+      if (only !== undefined) {
+        months.push({ ...head, changes });
+        continue;
+      }
+      const { budgeted } = summarize(plan, snap, await store.monthTotals(m));
+      months.push({ ...head, outside: money(budgeted.outside), total: money(budgeted.total),
+        uncategorized: await uncategorizedOf(m, off), changes });
+    }
+    return c.json({ months, missingMonths, note: HISTORY_NOTE });
+  });
 
   app.get(`${g}/status`, async c => {
     const month = monthParam(c);
