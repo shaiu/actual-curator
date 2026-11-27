@@ -79,6 +79,19 @@ export function runway({ plan, snap, totals, past, currentRows, offbudget }: Run
   const notes: RunwayNote[] = [{ effect: 'less', text: "Spending outside the plan's lines is not in the monthly gap." }];
   const loose = [...past.map(p => p.rows), currentRows].reduce((s, rows) => s + uncategorized(rows, offbudget).out, 0);
   if (loose > 0) notes.push({ effect: 'less', text: 'Uncategorized spending is not deducted.', amount: loose });
+  // The average is by calendar month, so a payday that slides over a month edge adds or drops a whole deposit.
+  const landed = past.flatMap(p => incomeStatus(plan, p.month, p.rows.filter(r => !offbudget.has(r.account))).landed);
+  for (const s of countedSources(plan)) {
+    const n = landed.filter(l => l.source === s).length;
+    if (n === past.length) continue;
+    notes.push({ effect: n > past.length ? 'less' : 'longer',
+      text: `Income "${s.name}": ${n} deposit(s) in the three averaged months, not 3. A payday that crossed a month edge changes the average.` });
+  }
+  // In none of Actual's totals, so not in the carry-over, even when it matches a source and so counts as landed.
+  const waiting = uncategorized(currentRows, offbudget).in;
+  if (waiting > 0) {
+    notes.push({ effect: 'longer', text: 'Uncategorized money received this month is not counted until it has a category.', amount: waiting });
+  }
   for (const s of incomeStatus(plan, month, currentRows.filter(r => !offbudget.has(r.account))).expected) {
     if (!s.fixedTransfer) notes.push({ effect: 'longer', text: `Expected income "${s.name}" has not landed this month and is not counted.` });
   }

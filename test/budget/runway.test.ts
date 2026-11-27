@@ -214,3 +214,43 @@ test('no excluded or unplanned name or id appears', async () => {
   const text = JSON.stringify(await run());
   for (const s of ['biz', 'Biz / Inbal', 'misc', 'Wants / Misc']) expect(text).not.toContain(s);
 });
+
+test('a stale excluded category is counted in the error, never named; a stale line is still named', async () => {
+  const hidden = (...ids: string[]) => snap(s => { for (const id of ids) lineOf(s, id).hidden = true; });
+  const message = async (path: string) => {
+    const r = await ctx.app.request(`/v1/budget${path}`, { headers: { authorization: 'Bearer secret' } });
+    expect(r.status).toBe(409);
+    return ((await r.json()) as any).error.message as string;
+  };
+  hidden('biz');
+  for (const path of ['/runway', '/summary?month=2026-11', '/history?month=2026-11', '/status']) {
+    expect(await message(path)).toBe('plan categories missing or hidden in Actual: 1 excluded (not named)');
+  }
+  hidden('biz', 'groc');
+  expect(await message('/runway')).toBe('plan categories missing or hidden in Actual: groc, 1 excluded (not named)');
+});
+
+const countNote = (effect: string, n: number) =>
+  ({ effect, text: `Income "Salary": ${n} deposit(s) in the three averaged months, not 3. A payday that crossed a month edge changes the average.` });
+const countNotes = async () => (await run()).notes.filter((x: any) => x.text.startsWith('Income "'));
+
+test('notes: a counted source without three deposits in the averaged months is flagged, in the direction it can mislead', async () => {
+  ctx.store.rows = [...earn(400000), salary('2026-10', 400001, { date: '2026-10-30' })];
+  expect(await countNotes()).toEqual([countNote('less', 4)]);
+  ctx.store.rows = earn(400000).slice(1);
+  expect(await countNotes()).toEqual([countNote('longer', 2)]);
+});
+
+test('notes: three deposits spread unevenly give the same average, so no note', async () => {
+  ctx.store.rows = [salary('2026-08'), salary('2026-10', 400000, { date: '2026-10-01', id: 'a' }), salary('2026-10', 400000, { date: '2026-10-31', id: 'b' })];
+  expect(await countNotes()).toEqual([]);
+});
+
+test('notes: money received this month with no category is not available, and the answer says so', async () => {
+  // It matches the salary source, so no "has not landed" note covers it.
+  ctx.store.rows.push(salary('2026-11', 400000, { category: null }),
+    salary('2026-10', 777, { category: null, id: 'old-in', payee: 'Gift', importedPayee: 'Gift' }));
+  const notes = (await run()).notes;
+  expect(notes).toContainEqual({ effect: 'longer', text: 'Uncategorized money received this month is not counted until it has a category.', amount: m(400000) });
+  expect(notes.some((x: any) => x.text.includes('has not landed'))).toBe(false);
+});

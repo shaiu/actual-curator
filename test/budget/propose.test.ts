@@ -109,7 +109,8 @@ describe('checkPlan', () => {
   });
   it('covers excluded categories too, and propose checks first', () => {
     const s = snap(0, [cat('gone'), cat('hid'), cat('ok')]);
-    expect(() => checkPlan(p, s)).toThrow(/biz/);
+    expect(() => checkPlan(p, s)).toThrow(/1 excluded \(not named\)/);
+    expect(() => checkPlan(p, s)).not.toThrow(/biz/);
     expect(() => propose(p, s)).toThrow(PlanError);
   });
   it('passes when all present', () => {
