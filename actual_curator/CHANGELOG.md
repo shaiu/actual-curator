@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1
+
+- The estimate of how long the plan lasts now says when an income source has recently brought in noticeably more or less
+  than the plan expects, and which way that moves the estimate.
+
 ## 0.6.0
 
 - The budget advisor can now read a month's totals, how the budget changed over past months, account balances and

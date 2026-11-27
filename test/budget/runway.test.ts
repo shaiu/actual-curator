@@ -1,9 +1,11 @@
 import { beforeEach, expect, test } from 'vitest';
 import { regularIncome } from '../../src/budget/runway.ts';
 import { type MonthSnapshot, type PlanInput, planSchema } from '../../src/budget/types.ts';
-import { PLAN_SAVED, cat, makeBudgetApp, plan, row, snapshot } from '../helpers/budget-http.ts';
+import { PLAN_SAVED, cat, makeBudgetApp, plan as helperPlan, row, snapshot } from '../helpers/budget-http.ts';
 
 let ctx: ReturnType<typeof makeBudgetApp>;
+/** The shared plan, expecting what these tests pay, so no source reads as off its expected amount. */
+const plan: PlanInput = { ...helperPlan, incomeSources: [{ ...helperPlan.incomeSources[0]!, expectedAmount: 4000 }] };
 const m = (amount: number) => ({ amount, formatted: (amount / 100).toFixed(2) });
 const savePlan = (p: PlanInput = plan) => ctx.files.savePlan(p as never, { by: 't', why: 't' }, PLAN_SAVED);
 const salary = (month: string, amount = 400000, over: object = {}) => row({ id: `sal-${month}-${amount}`, date: `${month}-10`, amount, category: 'sal', ...over });
@@ -230,20 +232,43 @@ test('a stale excluded category is counted in the error, never named; a stale li
   expect(await message('/runway')).toBe('plan categories missing or hidden in Actual: groc, 1 excluded (not named)');
 });
 
-const countNote = (effect: string, n: number) =>
-  ({ effect, text: `Income "Salary": ${n} deposit(s) in the three averaged months, not 3. A payday that crossed a month edge changes the average.` });
-const countNotes = async () => (await run()).notes.filter((x: any) => x.text.startsWith('Income "'));
+const averageNote = (effect: string, average: string, deposits: number, expected = '4000.00', name = 'Salary') => ({ effect,
+  text: `Income "${name}": the three averaged months give ${average} a month (${deposits} deposit(s)); the plan expects ${expected}. `
+    + `At the plan's amount the money would last ${effect === 'less' ? 'less' : 'longer'}.` });
+const incomeNotes = async () => (await run()).notes.filter((x: any) => x.text.startsWith('Income "'));
 
-test('notes: a counted source without three deposits in the averaged months is flagged, in the direction it can mislead', async () => {
-  ctx.store.rows = [...earn(400000), salary('2026-10', 400001, { date: '2026-10-30' })];
-  expect(await countNotes()).toEqual([countNote('less', 4)]);
+test('notes: an irregular source averaging above the plan means the money may last less, whatever the deposit count', async () => {
+  savePlan({ ...plan, incomeSources: [...plan.incomeSources, { name: 'Draw', payee: 'Draw', expectedAmount: 5000, expectedDay: 19 }] });
+  const draw = (month: string, amount: number) =>
+    row({ id: `draw-${month}`, date: `${month}-19`, amount, category: 'sal', payee: 'Draw', importedPayee: 'Draw' });
+  ctx.store.rows.push(draw('2026-08', 2000000), draw('2026-10', 1000000));
+  expect(await incomeNotes()).toEqual([averageNote('less', '10000.00', 2, '5000.00', 'Draw')]);
+});
+
+test('notes: a source averaging below the plan means the money may last longer', async () => {
   ctx.store.rows = earn(400000).slice(1);
-  expect(await countNotes()).toEqual([countNote('longer', 2)]);
+  expect(await incomeNotes()).toEqual([averageNote('longer', '2666.67', 2)]);
+});
+
+test('notes: an extra deposit that raises the average is reported by its effect on the money', async () => {
+  ctx.store.rows = [...earn(400000), salary('2026-10', 400001, { date: '2026-10-30' })];
+  expect(await incomeNotes()).toEqual([averageNote('less', '5333.34', 4)]);
+});
+
+test('notes: an average within 10% of the plan, either way, is not flagged; just past it is', async () => {
+  for (const amount of [440000, 360000]) {
+    ctx.store.rows = earn(amount);
+    expect(await incomeNotes()).toEqual([]);
+  }
+  ctx.store.rows = earn(440100);
+  expect(await incomeNotes()).toEqual([averageNote('less', '4401.00', 3)]);
+  ctx.store.rows = earn(359900);
+  expect(await incomeNotes()).toEqual([averageNote('longer', '3599.00', 3)]);
 });
 
 test('notes: three deposits spread unevenly give the same average, so no note', async () => {
   ctx.store.rows = [salary('2026-08'), salary('2026-10', 400000, { date: '2026-10-01', id: 'a' }), salary('2026-10', 400000, { date: '2026-10-31', id: 'b' })];
-  expect(await countNotes()).toEqual([]);
+  expect(await incomeNotes()).toEqual([]);
 });
 
 test('notes: money received this month with no category is not available, and the answer says so', async () => {
