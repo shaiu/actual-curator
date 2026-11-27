@@ -1,0 +1,165 @@
+{
+  "route": "GET /v1/budget/runway",
+  "status": 200,
+  "body": {
+    "month": "2026-11",
+    "status": "limited",
+    "monthlyPlan": {
+      "amount": 460000,
+      "formatted": "4600.00"
+    },
+    "plannedLines": [
+      {
+        "categoryId": "rent",
+        "label": "Needs / Rent",
+        "monthly": {
+          "amount": 280000,
+          "formatted": "2800.00"
+        }
+      },
+      {
+        "categoryId": "groc",
+        "label": "Needs / Groceries",
+        "monthly": {
+          "amount": 100000,
+          "formatted": "1000.00"
+        }
+      },
+      {
+        "categoryId": "fun",
+        "label": "Wants / Fun",
+        "monthly": {
+          "amount": 50000,
+          "formatted": "500.00"
+        }
+      },
+      {
+        "categoryId": "prot",
+        "label": "Needs / Insurance",
+        "monthly": {
+          "amount": 30000,
+          "formatted": "300.00"
+        }
+      }
+    ],
+    "oneOffs": [],
+    "averageIncome": {
+      "amount": 400000,
+      "formatted": "4000.00"
+    },
+    "incomeMonths": [
+      {
+        "month": "2026-08",
+        "regular": [
+          {
+            "source": "Salary",
+            "amount": {
+              "amount": 400000,
+              "formatted": "4000.00"
+            }
+          }
+        ],
+        "regularTotal": {
+          "amount": 400000,
+          "formatted": "4000.00"
+        },
+        "other": {
+          "amount": 0,
+          "formatted": "0.00"
+        }
+      },
+      {
+        "month": "2026-09",
+        "regular": [
+          {
+            "source": "Salary",
+            "amount": {
+              "amount": 400000,
+              "formatted": "4000.00"
+            }
+          }
+        ],
+        "regularTotal": {
+          "amount": 400000,
+          "formatted": "4000.00"
+        },
+        "other": {
+          "amount": 0,
+          "formatted": "0.00"
+        }
+      },
+      {
+        "month": "2026-10",
+        "regular": [
+          {
+            "source": "Salary",
+            "amount": {
+              "amount": 400000,
+              "formatted": "4000.00"
+            }
+          }
+        ],
+        "regularTotal": {
+          "amount": 400000,
+          "formatted": "4000.00"
+        },
+        "other": {
+          "amount": 25000,
+          "formatted": "250.00"
+        }
+      }
+    ],
+    "gap": {
+      "amount": 60000,
+      "formatted": "600.00"
+    },
+    "available": {
+      "amount": 719000,
+      "formatted": "7190.00"
+    },
+    "carryOver": {
+      "carryOverOut": {
+        "amount": 999000,
+        "formatted": "9990.00"
+      },
+      "negativeBalances": {
+        "amount": 0,
+        "formatted": "0.00"
+      },
+      "stillNeeded": {
+        "amount": 280000,
+        "formatted": "2800.00"
+      }
+    },
+    "shortfall": null,
+    "months": 11.9,
+    "wholeMonths": 11,
+    "lastCoveredMonth": "2027-10",
+    "notes": [
+      {
+        "effect": "less",
+        "text": "Spending outside the plan's lines is not in the monthly gap."
+      },
+      {
+        "effect": "less",
+        "text": "Uncategorized spending is not deducted.",
+        "amount": {
+          "amount": 4200,
+          "formatted": "42.00"
+        }
+      },
+      {
+        "effect": "longer",
+        "text": "Expected income \"Salary\" has not landed this month and is not counted."
+      },
+      {
+        "effect": "longer",
+        "text": "Money already in category balances is not counted."
+      },
+      {
+        "effect": "always",
+        "text": "The plan and its income sources are used as saved: a line or source that has ended or not started counts as written. Savings outside Actual are not counted."
+      }
+    ]
+  }
+}

@@ -7,6 +7,7 @@ import { buildEvents, type BudgetEvent, type IncomeRow, incomeStatus } from '../
 import { dataMonth, lineChanges, lineIds, lineMonth, summarize, uncategorized } from '../budget/ledger.ts';
 import { type Move, offPlan, type OffPlanLine, pace, type PaceLine, suggestMoves } from '../budget/pace.ts';
 import { availableFor, checkAccounts, checkPlan, fundingShortfall, PlanError, propose, proposalId } from '../budget/propose.ts';
+import { countedSources, runway } from '../budget/runway.ts';
 import { type MonthSnapshot, type Plan, planSchema } from '../budget/types.ts';
 import { ApiError } from './errors.ts';
 import { money } from './format.ts';
@@ -320,6 +321,34 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
         uncategorized: await uncategorizedOf(m, off), changes });
     }
     return c.json({ months, missingMonths, note: HISTORY_NOTE });
+  });
+
+  app.get(`${g}/runway`, async c => {
+    await freshSync(store);
+    const month = currentMonth(now());
+    const { plan, snap } = await load(month);
+    if (!countedSources(plan).length) {
+      throw new ApiError(409, 'no_income_sources', 'the plan has no income source that is not a fixed transfer');
+    }
+    const averaged = [-3, -2, -1].map(n => addMonths(month, n));
+    // The month of the first transaction may be partial, so it is never averaged.
+    const first = await store.firstTransactionMonth();
+    if (first === null || first >= averaged[0]!) {
+      throw new ApiError(409, 'not_enough_history', `needs three complete months of data before ${month}`);
+    }
+    const past = [];
+    for (const m of averaged) past.push({ month: m, rows: await monthRowsAll(m) });
+    const r = runway({ plan, snap, totals: await store.monthTotals(month), past, currentRows: await monthRowsAll(month),
+      offbudget: await offBudgetIds() });
+    return c.json({ ...r, monthlyPlan: money(r.monthlyPlan),
+      plannedLines: r.plannedLines.map(l => ({ ...l, monthly: money(l.monthly) })), averageIncome: money(r.averageIncome),
+      incomeMonths: r.incomeMonths.map(x => ({ month: x.month, regular: x.regular.map(s => ({ ...s, amount: money(s.amount) })),
+        regularTotal: money(x.regularTotal), other: money(x.other) })),
+      gap: money(r.gap), available: money(r.available),
+      carryOver: { carryOverOut: money(r.carryOver.carryOverOut), negativeBalances: money(r.carryOver.negativeBalances),
+        stillNeeded: money(r.carryOver.stillNeeded) },
+      shortfall: r.shortfall === null ? null : money(r.shortfall),
+      notes: r.notes.map(({ amount, ...n }) => ({ ...n, ...(amount === undefined ? {} : { amount: money(amount) }) })) });
   });
 
   app.get(`${g}/status`, async c => {

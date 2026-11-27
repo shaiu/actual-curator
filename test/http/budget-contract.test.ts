@@ -84,6 +84,59 @@ test('status: a setaside and a variable on watch, a variable off, a suggested mo
   await expectFixture('status', 'GET /v1/budget/status', r, 200);
 });
 
+/** Three months of salary, then this month: nothing landed yet, one uncategorized outflow. */
+const gapRows = () => [
+  ...['2026-08', '2026-09', '2026-10'].map(m => row({ id: `sal-${m}`, date: `${m}-10`, amount: 400000, category: 'sal' })),
+  row({ id: 'gift', date: '2026-10-12', amount: 25000, payee: 'Gift', importedPayee: 'Gift', category: 'sal' }),
+  row({ id: 'loose', date: '2026-11-03', amount: -4200, payee: 'Shop', importedPayee: 'Shop' }),
+];
+/** An excluded line with a negative budgeted amount, as a business category can have: it must only show combined. */
+const gapMonth = (month: string, groc: number, biz: number) => {
+  const s = snapshot(month);
+  Object.assign(s.categories.find(c => c.id === 'groc')!, { budgeted: groc });
+  Object.assign(s.categories.find(c => c.id === 'biz')!, { budgeted: biz });
+  ctx.store.snaps.set(month, s);
+  ctx.store.totals.set(month, { carryOverIn: 1180000, income: month === '2026-11' ? 0 : 400000, lastMonthOverspent: -5000,
+    budgeted: groc + 80000 + biz, spent: 20000, toBudget: 1175000 - groc - 80000 - biz - 10000 });
+};
+
+test('summary', async () => {
+  savePlan();
+  gapMonth('2026-11', 100000, -4000);
+  ctx.store.rows = gapRows();
+  await expectFixture('summary', 'GET /v1/budget/summary', await get('/summary?month=2026-11'), 200);
+});
+
+test('history: one month missing, a move leaving the lines, an unconfirmed apply', async () => {
+  savePlan();
+  ctx.store.firstMonth = '2026-07';
+  for (const m of ['2026-07', '2026-08', '2026-09', '2026-10']) gapMonth(m, 90000, -4000);
+  gapMonth('2026-11', 100000, 0);
+  ctx.store.rows = gapRows();
+  const entry = { month: '2026-11', approvedBy: 'shai' };
+  ctx.files.journal({ ...entry, op: 'move', from: 'groc', to: 'misc', amount: 2000 }, new Date('2026-11-04T08:00:00Z'));
+  ctx.files.journal({ ...entry, op: 'apply', added: { groc: 12000 }, outcome: 'unconfirmed' }, new Date('2026-11-02T08:00:00Z'));
+  await expectFixture('history', 'GET /v1/budget/history', await get('/history?month=2026-11'), 200);
+});
+
+test('runway', async () => {
+  savePlan();
+  gapMonth('2026-11', 100000, -4000);
+  ctx.store.rows = gapRows();
+  await expectFixture('runway', 'GET /v1/budget/runway', await get('/runway'), 200);
+});
+
+test('accounts', async () => {
+  ctx.store.balances = [
+    { id: 'a', name: 'Bank', offbudget: false, closed: false, balance: 1180000 },
+    { id: 'off', name: 'Savings', offbudget: true, closed: false, balance: 25000000 },
+    { id: 'old', name: 'Old card', offbudget: false, closed: true, balance: 0 },
+  ];
+  ctx.store.rows = [row({ id: 't-out', transferId: 't-in', date: '2026-11-05', amount: -300000, accountName: 'Bank', payee: 'Savings' }),
+    row({ id: 't-in', transferId: 't-out', date: '2026-11-05', amount: 300000, account: 'off', accountName: 'Savings', payee: 'Bank' })];
+  await expectFixture('accounts', 'GET /v1/accounts', await ctx.app.request('/v1/accounts', { headers: auth }), 200);
+});
+
 test('ack', async () => {
   savePlan();
   ctx.store.rows = [row({})];
