@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2
+
+- The estimate of how long the plan lasts is now also given at the income your plan expects, next to the one based on
+  recent income.
+
 ## 0.6.1
 
 - The estimate of how long the plan lasts now says when an income source has recently brought in noticeably more or less
