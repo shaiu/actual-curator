@@ -473,11 +473,13 @@ paths:
       summary: |
         An ESTIMATE of how many months the money in the budget covers the gap between the plan's lines and regular income
         (deposits matching a plan income source that is not a fixed transfer, averaged over the three complete months before
-        this one). Always the current month. Syncs first. status: short_now (nothing available), no_gap (no month count) or
+        this one). atPlan is a second estimate of the same money and plan, with each counted source at its expected monthly
+        amount from the plan; the top-level gap and months stay the recent-income estimate. Always the current month. Syncs
+        first. status: short_now (nothing available), no_gap (no month count) or
         limited; months is rounded down to one decimal and counts from next month. notes say what the estimate leaves out,
         each "less" (may last less), "longer" (may last longer) or "always".
       responses:
-        "200": { description: "OK: {month, status, monthlyPlan, plannedLines:[{categoryId,label,monthly}], oneOffs:[{label,due}], averageIncome, incomeMonths:[{month,regular:[{source,amount}],regularTotal,other}], gap, available, carryOver:{carryOverOut,negativeBalances,stillNeeded}, shortfall (Money or null), months, wholeMonths, lastCoveredMonth, notes:[{effect,text,amount?}]}; amounts are Money" }
+        "200": { description: "OK: {month, atPlan:{income,sources:[{source,amount}],gap,status,months,wholeMonths,lastCoveredMonth}, status, monthlyPlan, plannedLines:[{categoryId,label,monthly}], oneOffs:[{label,due}], averageIncome, incomeMonths:[{month,regular:[{source,amount}],regularTotal,other}], gap, available, carryOver:{carryOverOut,negativeBalances,stillNeeded}, shortfall (Money or null), months, wholeMonths, lastCoveredMonth, notes:[{effect,text,amount?}]}; amounts are Money" }
         "400": { $ref: "#/components/responses/Error", description: "400 too_many_rows" }
         "409": { $ref: "#/components/responses/Error", description: "409 no_plan / stale_plan / not_enough_history / no_income_sources" }
         "503": { $ref: "#/components/responses/Error" }

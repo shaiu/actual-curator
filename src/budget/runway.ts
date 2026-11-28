@@ -33,6 +33,16 @@ export function regularIncome(plan: Plan, rows: CuratorRow[], incomeCategoryIds:
 
 export type RunwayNote = { effect: 'less' | 'longer' | 'always'; text: string; amount?: number };
 
+/** How long `available` covers a monthly `gap`, counting from the month after `month`. */
+function lasts(available: number, gap: number, month: string) {
+  const status = available <= 0 ? 'short_now' as const : gap <= 0 ? 'no_gap' as const : 'limited' as const;
+  const count = status === 'short_now' ? { months: 0, wholeMonths: 0 }
+    : status === 'no_gap' ? { months: null, wholeMonths: null }
+    // Rounded down: never promise a month the money does not cover.
+    : { months: Math.floor(available * 10 / gap) / 10, wholeMonths: Math.floor(available / gap) };
+  return { status, ...count, lastCoveredMonth: count.wholeMonths ? addMonths(month, count.wholeMonths) : null };
+}
+
 export type RunwayInput = {
   plan: Plan; snap: MonthSnapshot; totals: MonthTotals;
   /** The three complete months before `snap.month`, oldest first. */
@@ -70,12 +80,13 @@ export function runway({ plan, snap, totals, past, currentRows, offbudget }: Run
   const negativeBalances = snap.categories.filter(c => !c.isIncome).reduce((s, c) => s + Math.max(0, -c.balance), 0);
   const available = carryOverOut - negativeBalances - stillNeeded;
 
-  const status = available <= 0 ? 'short_now' as const : gap <= 0 ? 'no_gap' as const : 'limited' as const;
-  const count = status === 'short_now' ? { months: 0, wholeMonths: 0 }
-    : status === 'no_gap' ? { months: null, wholeMonths: null }
-    // Rounded down: never promise a month the money does not cover.
-    : { months: Math.floor(available * 10 / gap) / 10, wholeMonths: Math.floor(available / gap) };
-  const lastCoveredMonth = count.wholeMonths ? addMonths(month, count.wholeMonths) : null;
+  const recent = lasts(available, gap, month);
+
+  // The same money against the same plan, with each counted source at the amount the plan expects of it in a month.
+  const sources = countedSources(plan).map(x => ({ source: x.name, amount: Math.round(x.expectedAmount * 100) }));
+  const expectedIncome = sources.reduce((s, x) => s + x.amount, 0);
+  const planGap = monthlyPlan - expectedIncome;
+  const atPlan = { income: expectedIncome, sources, gap: planGap, ...lasts(available, planGap, month) };
 
   const notes: RunwayNote[] = [{ effect: 'less', text: "Spending outside the plan's lines is not in the monthly gap." }];
   const loose = [...past.map(p => p.rows), currentRows].reduce((s, rows) => s + uncategorized(rows, offbudget).out, 0);
@@ -104,8 +115,9 @@ export function runway({ plan, snap, totals, past, currentRows, offbudget }: Run
   notes.push({ effect: 'always', text: 'The plan and its income sources are used as saved: a line or source that has ended or not started counts as written. Savings outside Actual are not counted.' });
 
   return {
-    month, status, monthlyPlan, plannedLines, oneOffs, averageIncome, incomeMonths, gap, available,
+    month, atPlan, status: recent.status, monthlyPlan, plannedLines, oneOffs, averageIncome, incomeMonths, gap, available,
     carryOver: { carryOverOut, negativeBalances, stillNeeded },
-    shortfall: available < 0 ? -available : null, ...count, lastCoveredMonth, notes,
+    shortfall: available < 0 ? -available : null, months: recent.months, wholeMonths: recent.wholeMonths,
+    lastCoveredMonth: recent.lastCoveredMonth, notes,
   };
 }

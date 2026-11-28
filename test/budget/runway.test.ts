@@ -279,3 +279,42 @@ test('notes: money received this month with no category is not available, and th
   expect(notes).toContainEqual({ effect: 'longer', text: 'Uncategorized money received this month is not counted until it has a category.', amount: m(400000) });
   expect(notes.some((x: any) => x.text.includes('has not landed'))).toBe(false);
 });
+
+const expecting = (amount: number) => savePlan({ ...plan, incomeSources: [{ ...plan.incomeSources[0]!, expectedAmount: amount }] });
+
+test('atPlan: the same money and plan, with income at the expected amounts; the recent figure is unchanged', async () => {
+  expecting(3500);
+  const b = await run();
+  expect(b).toMatchObject({ status: 'limited', averageIncome: m(400000), gap: m(60000), months: 12 });
+  expect(b.atPlan).toEqual({ income: m(350000), sources: [{ source: 'Salary', amount: m(350000) }], gap: m(110000),
+    status: 'limited', months: 6.5, wholeMonths: 6, lastCoveredMonth: '2027-05' });
+});
+
+test('atPlan: adds every counted source, to the agora, and leaves out a fixed transfer', async () => {
+  savePlan({ ...plan, incomeSources: [
+    { ...plan.incomeSources[0]!, expectedAmount: 3000.5 },
+    { name: 'Side', payee: 'Side', expectedAmount: 499.5, expectedDay: 19 },
+    { name: 'Savings', payee: 'Savings', expectedAmount: 9000, expectedDay: 1, fixedTransfer: true },
+  ] });
+  expect((await run()).atPlan).toMatchObject({ income: m(350000), gap: m(110000),
+    sources: [{ source: 'Salary', amount: m(300050) }, { source: 'Side', amount: m(49950) }] });
+});
+
+test('atPlan: its own status, either way round', async () => {
+  expecting(4600);
+  let b = await run();
+  expect(b.status).toBe('limited');
+  expect(b.atPlan).toMatchObject({ status: 'no_gap', gap: m(0), months: null, wholeMonths: null, lastCoveredMonth: null });
+  expecting(4000);
+  ctx.store.rows = earn(500000);
+  b = await run();
+  expect(b.status).toBe('no_gap');
+  expect(b.atPlan).toMatchObject({ status: 'limited', gap: m(60000), months: 12, wholeMonths: 12 });
+});
+
+test('atPlan: nothing available is short_now in both, with no months', async () => {
+  carryOut(100000);
+  const b = await run();
+  expect(b.status).toBe('short_now');
+  expect(b.atPlan).toMatchObject({ status: 'short_now', months: 0, wholeMonths: 0, lastCoveredMonth: null });
+});
