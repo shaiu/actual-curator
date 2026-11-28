@@ -341,6 +341,8 @@ export function registerBudgetRoutes(app: Hono, deps: ApiDeps, now: () => Date):
     const r = runway({ plan, snap, totals: await store.monthTotals(month), past, currentRows: await monthRowsAll(month),
       offbudget: await offBudgetIds() });
     return c.json({ ...r, monthlyPlan: money(r.monthlyPlan),
+      atPlan: { ...r.atPlan, income: money(r.atPlan.income), gap: money(r.atPlan.gap),
+        sources: r.atPlan.sources.map(s => ({ ...s, amount: money(s.amount) })) },
       plannedLines: r.plannedLines.map(l => ({ ...l, monthly: money(l.monthly) })), averageIncome: money(r.averageIncome),
       incomeMonths: r.incomeMonths.map(x => ({ month: x.month, regular: x.regular.map(s => ({ ...s, amount: money(s.amount) })),
         regularTotal: money(x.regularTotal), other: money(x.other) })),

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2 — the runway also estimates at the plan's expected income
+
+- `GET /v1/budget/runway`: new `atPlan` field, a second estimate with the same available money and monthly plan against
+  the counted income sources' expected amounts. It carries the income, the sources, the gap and how long the money
+  lasts. The top-level fields are unchanged: they remain the estimate at the last three months' income.
+
 ## 0.6.1 — the runway compares each income source with the plan
 
 - `GET /v1/budget/runway`: when a counted source's three-month average is more than 10% from its expected amount, a note

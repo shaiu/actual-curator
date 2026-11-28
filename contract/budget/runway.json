@@ -3,6 +3,29 @@
   "status": 200,
   "body": {
     "month": "2026-11",
+    "atPlan": {
+      "income": {
+        "amount": 1500000,
+        "formatted": "15000.00"
+      },
+      "sources": [
+        {
+          "source": "Salary",
+          "amount": {
+            "amount": 1500000,
+            "formatted": "15000.00"
+          }
+        }
+      ],
+      "gap": {
+        "amount": -1040000,
+        "formatted": "-10400.00"
+      },
+      "status": "no_gap",
+      "months": null,
+      "wholeMonths": null,
+      "lastCoveredMonth": null
+    },
     "status": "limited",
     "monthlyPlan": {
       "amount": 460000,
